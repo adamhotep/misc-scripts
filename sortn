@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+help() { cat <<'/help'
+Usage: sortn [OPTION...] [FILE...]
+Given input(s), write the first line, then pass the rest to `sort`.
+
+Use `sortn -10` for 10 title lines instead. See `sort --help` for other options.
+
+sortn v0.4+20170530 by Adam Katz <https://github.com/adamhotep>
+Copyright 2005+, released under the GNU GPL version 2 or later
+/help
+exit
+}
+
+# push given argument(s) onto the end of the args[] array
+args_push() { for a in "$@"; do args[${#args[@]}]="$a"; done; }
+
+SKIP=
+DEFAULT_SKIP=1
+
+if [ "$*" = -h ]; then help; fi
+
+while getopts bcCdfghik:mnNo:rRsS:t:T:uVz1234567890-: arg; do
+  case "$arg" in
+    ( [0-9] )	SKIP=$SKIP$arg ;;
+    ( [koStT] )	args_push "-$arg" "$OPTARG" ;;
+    ( - )	[ "$OPTARG" = help ] && help || args_push "--$OPTARG" ;;
+    ( \? )	echo "Try --help" >&2; exit 2 ;;
+    ( * )	args_push "-$arg" ;;
+  esac
+done
+shift $((OPTIND-1))
+
+main() {
+  for (( i=1; $i <= ${SKIP:-$DEFAULT_SKIP}; i++ )); do
+    IFS= read -r title
+    echo "$title"
+  done
+
+  sort ${args[@]+"${args[@]}"}
+}
+
+cat "$@" |main
+
+exit $?
+
+
+# >(command) is bash's outbound process substitution, a forked pipe...unreliably
+#cat ${1+"$@"} |tee >(cat |head -n$SKIP) >(sed "1,${SKIP}d" |sort ${args[@]+"${args[@]}"}) >/dev/null
