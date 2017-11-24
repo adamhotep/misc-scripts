@@ -5,8 +5,8 @@ Given input(s), write the first line, then pass the rest to `sort`.
 
 Use `sortn -10` for 10 title lines instead. See `sort --help` for other options.
 
-sortn v0.4+20170530 by Adam Katz <https://github.com/adamhotep>
-Copyright 2005+, released under the GNU GPL version 2 or later
+sortn 0.5+20171123, Copyright 2005+ by Adam Katz, GPL v2+
+Part of misc-scripts:  https://github.com/adamhotep/misc-scripts
 /help
 exit
 }
