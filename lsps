@@ -1,0 +1,74 @@
+#!/bin/sh
+help() { cat <</help
+Find entire ownership hierarchy of given process(es) from top to bottom
+Usage: lsps [PID|COMMAND...]
+
+lsps 0.2+20171123, Copyright 2010+ by Adam Katz, GPL v2+
+Part of misc-scripts:  https://github.com/adamhotep/misc-scripts
+/help
+}
+
+# True when we have the given command(s).  No output.
+we_have() { command -v "$@" >/dev/null 2>&1; }
+
+# dummy pass-through to be overridden if colors are enabled
+output() { cat; }
+unset C04 C0
+
+# looks like dash short circuits || but not && but its [ ... -a ... ] works fine
+if [ -n "$CLICOLOR_FORCE" ] || [ -t 1 -a \
+     "${TERM%256}$GREP_COLOR$LS_COLORS$CLICOLOR" != "${TERM%color}" ]
+then
+  if we_have grcat; then # use GRC for colors, https://github.com/adamhotep/grc
+    output() { grcat conf.ps; }
+  else
+    C04='[0;4m'  # underlined text
+    C0='[0m'     # color reset
+  fi
+fi
+
+#PS_OPTIONS=user,ruser,pid,ppid,%cpu,%mem,vsz,rss,tt,stat,start,time,args
+PS_OPTIONS=user,ruser,pid,ppid,%cpu,%mem,stat,start,time,args
+
+lsps() {
+  # find the parent process ID (assigned to $PPID) and print the process list
+  PPID="$(ps -o "$PS_OPTIONS" "$1" \
+    |awk -v TITLE=$TITLE -v C04="$C04" -v C0="$C0" '
+      NR == TITLE {
+        if (C04) $0 = C04 $0 C0
+      }
+      NR > !TITLE { print > "/dev/stderr" }
+      NR > 1 { print $4 }
+    ')" 2>&1	# sneaky: this "leaks" the process list to stdout via stderr
+  TITLE=0	# we only want the title to display once per hierarchy
+  if [ "$PPID" != 0 ] && [ "$PPID" != "$1" ]; then
+    lsps "$PPID"  # RECURSIVE function call to find more ancestors
+  fi
+}
+
+for PID in "$@"; do
+
+  if [ "${PID#-h}" != "${PID#--help}" ]; then
+    help
+    exit
+  fi
+
+  TITLE=1	# show title for each PID (set to zero later in recursive calls)
+  if [ "$PID" != "$1" ]; then echo; fi # add a space between PID lists
+
+  if [ "$PID" -gt 0 ] 2>/dev/null; then
+    lsps "$PID"
+  elif we_have pgrep; then
+    NEWPID=$(pgrep -- "$PID") # intentionally missing outer quotes
+    if [ -n "$NEWPID" ]; then
+      $0 $NEWPID  # intentionally missing quotes; we want 123 456, not "123 456"
+    else
+      echo "No PID(s) found matching '$PID'" >&2
+      exit 2
+    fi
+  else
+    echo "Invalid PID '$PID' and you do not have pgrep installed to find it" >&2
+    exit 2
+  fi
+done |output
+

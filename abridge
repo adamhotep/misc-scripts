@@ -1,0 +1,78 @@
+#!/bin/sh
+help() { cat <</help
+Usage: abridge [-n] [-LINES[/BUNDLE]] [FILE...]
+Show an abridged version of the given input(s)
+  -n      Print line numbers with output lines
+  LINES   The number of lines to show for each BUNDLE (default=10)
+  BUNDLE  Number of lines per LINES (pipe default=100, file default=all lines)
+/help
+  version
+}
+version() {
+  echo "abridge 0.3+20171123 copyright 2016+ by Adam Katz, GPL v2+"
+  echo "https://github.com/adamhotep/misc-scripts"
+  exit
+}
+
+unset RATE BUNDLE NUMBER
+while getopts 0123456789/b:hl:nr:vV: arg; do
+  case $arg in
+    [0-9/] )	RATE="$RATE$arg" ;;
+    b ) 	BUNDLE="$OPTARG" ;;
+    h ) 	help ;;
+    [lr] )	RATE="$OPTARG" ;;
+    n ) 	ACTION='{ printf "%d:%s\n", NR, $0; }' ;;
+    [Vv] )	version ;;
+    * ) 	exit 2 ;;  # getopts already reported the illegal option
+  esac
+done
+shift $((OPTIND-1))
+
+if [ -z "$RATE" ]; then
+  RATE=10
+elif [ "$RATE" != "${RATE#*/*/}" ]; then
+  echo "Invalid rate '$RATE' -- you cannot have more than one BUNDLE" >&2
+  echo "See --help for usage" >&2
+  exit 2
+elif [ "$RATE" != "${RATE#*/}" ]; then
+  if [ -z "$BUNDLE" ]; then
+    BUNDLE="${RATE#*/}"
+  else
+    echo "WARNING: Ignoring given rate's bundle (${RATE#*/}) for -b $BUNDLE" >&2
+  fi
+  RATE="${RATE%%/*}"
+fi
+
+# what are you doing asking for zero or one line?  Shunting to head...
+if [ "$RATE" -lt 2 ] && [ -z "$BUNDLE" ]; then
+  exec head -n$RATE "$@"
+  exit $?
+fi
+
+# ensure we get the first line, decrement and use modulo == 1 (instead of 0)
+RATE=$((RATE-1))
+
+if [ ! -t 0 ] && [ "$#" = 0 ]; then # data via pipeline
+  if [ "${BUNDLE:=100}" -le "$RATE" ]; then
+    cat
+  else
+    awk "NR % int($BUNDLE/$RATE) == 1 $ACTION"
+  fi
+else
+  for FILE in "$@"; do
+    if [ "$#" -gt 1 ]; then
+      echo "==> $FILE <=="
+    fi
+    THIS_BUNDLE="$BUNDLE"
+    if [ -z "$THIS_BUNDLE" ]; then
+      THIS_BUNDLE="$(wc -l "$FILE")"
+      THIS_BUNDLE="${THIS_BUNDLE%%[^0-9]*}"
+    fi
+    if [ "$THIS_BUNDLE" -le "$RATE" ]; then
+      cat "$FILE"
+    else
+      awk "NR % int($THIS_BUNDLE/$RATE) == 1 $ACTION" "$FILE"
+    fi
+  done
+fi
+
