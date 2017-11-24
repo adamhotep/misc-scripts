@@ -1,0 +1,280 @@
+#!/usr/bin/perl
+# format documentation and reverse-engineering notes follow code
+
+use strict;
+use warnings;
+use Getopt::Std;
+
+# This is a hack that allows parsing pod data (at the cost of syn highlighting),
+# inspired by Tinita's post at http://www.perlmonks.org/?node_id=515663#515852
+# (comment out the next line to enable Pod highlighting)
+$_ = <<'=cut';
+=head1 NAME
+
+ls.swp - Show notes on vim swap files
+
+=head1 SYNOPSIS
+
+B<ls.swp> [OPTIONS] [SWAP_FILE...]
+
+ -H      Always show swap file names
+ -h      Suppress showing of swap file names
+ -v      Verbose (implies -H)
+
+ls.swp 0.2+20170303 Copyright 2017+ by Adam Katz, GPL v2+
+Part of misc-scripts:  https://github.com/adamhotep/misc-scripts
+
+=cut
+# further documentation lives at the end of this file
+
+s/[BCEFILNSZ]<([^>]*)>/$1/g;  # remove pod formatting code markup
+my @pod = split(/\r?\n/, $_);
+my ($name, $blurb) = $pod[2] =~ /^(\S+) - (.+)$/;
+my $version = $pod[$#pod-1];
+($main::VERSION) = $version =~ /^$name\s(\S+)/;
+
+my $usage = $pod[6];
+my $synopsis = "";
+for (my $i=6; $i <= $#pod; $i++) {
+  $_ = $pod[$i];
+  $synopsis .= "$_\n";
+  last if /$version/;
+}
+
+sub HELP_MESSAGE {
+  print "$blurb\n";
+  print $synopsis;
+  exit;
+}
+
+$Getopt::Std::STANDARD_HELP_VERSION = 1;  # exit after version info
+#sub VERSION_MESSAGE { # this overrides Getopt::Std's use of HELP_MESSAGE
+sub version {
+  print "$version\n";
+  exit;
+}
+
+HELP_MESSAGE() if scalar @ARGV == 1 and $ARGV[0] eq "-h"; # get help if just -h
+
+# defaults
+my $show_names = 0;
+
+my %opt = ();
+getopts("hHvV", \%opt) or die $usage;
+
+@ARGV = <.*.sw?> unless @ARGV;  # default to all swap files in current directory
+
+# TODO: abandon grep options and use
+#   show/hide sections: sS=swap, uU=user, hH=host, fF=file, aA=age
+#   show/hide lines:    mM=modified, rR=running
+#   and cC=color (swap file=purple, file=green, modified=red, running=yellow)
+if    ($opt{v})  { $show_names = 1; }
+elsif ($opt{H})  { $show_names = 1; }
+elsif ($opt{h})  { $show_names = 0; }	# -h is trumped by -H
+elsif (scalar @ARGV > 1) { $show_names = 1; }
+
+version()	if $opt{V};
+
+
+my $exit = 1;
+
+sub invalid {
+  $_ = shift;
+  print STDERR "Invalid swap file '$_'\n";
+}
+
+sub str2int {
+  my ($out, $offset, $len);
+  ($_, $offset, $len) = @_;
+  $_ = scalar reverse substr($_, $offset, $len);
+  $out = 0;
+  $len ||= 1;
+  for my $char (split //, $_) {
+    $out = $out * 256 + ord $char;
+  }
+  return $out;
+}
+
+foreach my $swap (@ARGV) {
+  open SWAP, "<:raw", $swap or invalid $swap and next;
+  my $block0;
+  read SWAP, $block0, 1024;
+  $block0 =~ /^b0VIM\s\d/ or invalid $swap and next;
+
+  my $mtime = str2int($block0, 16, 4);
+  my $pid   = str2int($block0, 24, 4);
+  my $user  =  substr($block0, 28, 40);
+  my $host  =  substr($block0, 68, 40);
+  my $fname =  substr($block0, 108, 900);
+  ($fname, my $fenc, my $dirty) = $fname =~ /\A([^\0]+)\0+(.*)(.)\z/ms;
+  $dirty = " (modified)" if $dirty eq "U"; # it's either U or null
+  $user =~ s/\0.*//g;  # remove nulls so the following s/// and comparison work
+  # vim stores user bob's home as ~bob in case another user is viewing it,
+  # but we know who you are and can abbreviate accordingly
+  $fname =~ s,^~$user/,~/, if $user eq $ENV{LOGNAME};
+
+  my $when = time - $mtime;
+  if ($when < 90 or $opt{v}) {	# last modified <90s ago: seconds
+    $when = sprintf("%ds", $when);
+  } elsif ($when < 5400) {	# last modified <90m ago: minutes
+    $when = sprintf("%.0fm", $when/60);
+  } elsif ($when < 172800) {	# last modified <48h ago: hours
+    $when = sprintf("%.0fh", $when/3600);
+  } elsif ($when < 7862400) {	# last modified <91d ago: days
+    $when = sprintf("%.0fd", $when/86400);
+  } elsif ($when < 47336400) {	# last modified <18mo ago: months
+    $when = sprintf("%.0fmo", $when/86400/365.25*12);
+  } else {			# last modified >1.5y ago: years
+    $when = sprintf("%.0fy", $when/86400/365.25);
+  }
+  if ($mtime == 0) {	# 1970/01/01 00:00:00 UTC
+    $when = "unknown age";
+  } else {
+    $when .= " ago";
+  }
+
+
+  if(system("ps $pid >/dev/null") == 0) {
+    $pid = " (running)";
+  } else {
+    $pid = "";
+  }
+
+  print "$swap:" if $show_names;
+  print "$user\@$host:$fname$dirty$pid $when\n";
+
+  $exit = 0;
+}
+
+exit $exit;
+
+
+# this vim search will find POD code that's too long: ^\s.\{72}\zs..*
+
+=head1 RESEARCH NOTES
+
+https://stackoverflow.com/q/29317107/519360
+http://vimdoc.sourceforge.net/htmldoc/recover.html#swap-file
+http://vim.1045645.n5.nabble.com/vim-swap-file-format-td1193173.html
+
+=head2 VIM SOURCE CODE
+
+From memline.c (in vim-8.0.0.0197, fitted for POD at 80 chars):
+
+ #define B0_FNAME_SIZE_ORG	900  /* what it was in older versions */
+ #define B0_FNAME_SIZE_NOCRYPT	898  /* 2 bytes used for other things */
+ #define B0_FNAME_SIZE_CRYPT	890  /* 10 bytes used for other things */
+ #define B0_UNAME_SIZE		40
+ #define B0_HNAME_SIZE		40
+ /*
+  * Restrict the numbers to 32 bits, otherwise most compilers will
+  * complain. This won't detect a 64 bit machine that only swaps a byte
+  * in the top 32 bits, but that is crazy anyway.
+  */
+ #define B0_MAGIC_LONG	0x30313233L
+ #define B0_MAGIC_INT	0x20212223L
+ #define B0_MAGIC_SHORT	0x10111213L
+ #define B0_MAGIC_CHAR	0x55
+ 
+ /*
+  * Block zero holds all info about the swap file.
+  *
+  * NOTE: DEFINITION OF BLOCK 0 SHOULD NOT CHANGE! It would make all
+  * existing swap files unusable!
+  *
+  * If size of block0 changes anyway, adjust MIN_SWAP_PAGE_SIZE in vim.h!
+  *
+  * This block is built up of single bytes, to make it portable across
+  * different machines. b0_magic_* is used to check the byte order and
+  * size of variables, because the rest of the swap file is not portable.
+  */
+ struct block0
+ {
+     char_u  b0_id[2];         /* id for block 0: BLOCK0_ID0, BLOCK0_ID1,
+                                * BLOCK0_ID1_C0, BLOCK0_ID1_C1, etc. */
+     char_u  b0_version[10];   /* Vim version string */
+     char_u  b0_page_size[4];  /* number of bytes per page */
+     char_u  b0_mtime[4];      /* last modification time of file */
+     char_u  b0_ino[4];        /* inode of b0_fname */
+     char_u  b0_pid[4];        /* process id of creator (or 0) */
+     char_u  b0_uname[B0_UNAME_SIZE]; /* name of user (uid if no name) */
+     char_u  b0_hname[B0_HNAME_SIZE]; /* host name (if it has a name) */
+     char_u  b0_fname[B0_FNAME_SIZE_ORG]; /* name of file being edited */
+     long    b0_magic_long;    /* check for byte order of long */
+     int     b0_magic_int;     /* check for byte order of int */
+     short   b0_magic_short;   /* check for byte order of short */
+     char_u  b0_magic_char;    /* check for last char */
+ };
+ 
+ /*
+  * Note: b0_dirty and b0_flags are put at the end of the file name.
+  * For very long file names in older versions of Vim they are invalid.
+  * The 'fileencoding' comes before b0_flags, with a NUL in front.
+  * But only when there is room, for very long file names it's omitted.
+  */
+ #define B0_DIRTY	0x55
+ #define b0_dirty	b0_fname[B0_FNAME_SIZE_ORG - 1]
+ 
+ /*
+  * The b0_flags field is new in Vim 7.0.
+  */
+ #define b0_flags	b0_fname[B0_FNAME_SIZE_ORG - 2]
+ 
+ /*
+  * Crypt seed goes here, 8 bytes.  New in Vim 7.3.
+  * Without encryption these bytes may be used for 'fenc'.
+  */
+ #define b0_seed	b0_fname[B0_FNAME_SIZE_ORG - 2 - MF_SEED_LEN]
+
+=head2 SAMPLE MODIFIED FILE
+
+ $ head -c1024 .ls.swp.swp |hd
+ 000  62 30 56 49 4d 20 38 2e  30 00 00 00 00 10 00 00  b0VIM 8.0.......
+ 010  06 a8 b4 58 c4 00 32 00  9c 4a 00 00 72 6f 6f 74  ...X..2..J..root
+ 020  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  ................
+ *
+ 040  00 00 00 00 74 61 62 61  73 63 6f 00 00 00 00 00  ....tabasco.....
+ 050  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  ................
+ 060  00 00 00 00 00 00 00 00  00 00 00 00 2f 74 6d 70  ............/tmp
+ 070  2f 6c 73 2e 73 77 70 00  00 00 00 00 00 00 00 00  /ls.swp.........
+ 080  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  ................
+ *
+ 3e0  00 00 00 00 00 00 00 00  00 75 74 66 2d 38 0d 55  .........utf-8.U
+ 3f0  33 32 31 30 00 00 00 00  23 22 21 20 13 12 55 00  3210....#"! ..U.
+ 
+Dissecting this using the C code's struct block0 as a guide, we get:
+ 
+ b0_id[2]         b0
+ b0_version[10]   VIM 8.0\0\0\0
+ b0_page_size[4]  0x00100000 rev-> 0x00001000 = 4096
+ b0_mtime[4]      0x06a8b458 rev-> 0x58b4a806 = 1488234502, 2017/02/27
+ b0_ino[4]        0xc4003200
+ b0_pid[4]        0x9c4a0000 rev-> 0x00004a9c = PID 19100
+ b0_uname[40]     root
+ b0_hname[40]     tabasco
+ b0_fname[900]    parse like: /^([^\0]+)(?:\0+(.+))?(.)(.)$/
+   0: fname       /tmp/ls.swp
+   *: fenc        utf-8 (a.k.a. fileencoding)
+  -2: b0_flags    \r (carriage return)
+  -1: b0_dirty    U -> dirty (this means the file was modified)
+ b0_magic_long    0x3332313000000000 rev-> 0x0000000030313233L
+ b0_magic_int     0x23222120 rev-> 0x20212223
+ b0_magic_short   0x1312 rev-> 0x1213, but memline.c has 0x10111213
+ b0_magic_char    U
+
+=head1 POSIX SHELL + AWK IMPLEMENTATION
+
+ if [ "$#" = 0 ]; then set -- .*.sw?; fi
+ for file in "$@"; do
+   strings "$file" |awk '
+     NR == 1 && $1 != "b0VIM" { exit } # not a vim swap file
+     NR == 2 { o = $0 "@" }
+     NR == 3 { o = o $0 }
+     NR == 4 { o = o ":" $0 }
+     NR == 5 { o = o " " $0 }
+     NR == 6 { print o, $0; exit }'
+ done
+ exit
+
+=cut
+
