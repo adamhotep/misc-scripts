@@ -78,7 +78,7 @@ if ! we_have readlink; then
   # Print the target of given LINK, keep following given -f, limit=10
   readlink() {
     local CANNONICALIZE= FILE="$1" i=0
-    if [ "$1" != "${1#-f}" ]; then CANNONICALIZE="$1" FILE="$2"; fi
+    if [ "$1" = "-f" ]; then CANNONICALIZE="$1" FILE="$2"; fi
     while [ -l "$FILE" ] && [ "$((i+=1))" -le 10 ]; do
       FILE="$(ls -dl "$FILE")"
       FILE="${FILE#* -> }"
