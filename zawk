@@ -66,6 +66,7 @@ find_unzipper() {
     ( *:\ LZMA\ * )	UNZIPPER=unlzma ;;
     ( *:\ XZ\ * )	UNZIPPER=unxz ;;
     ( *:\ Zip\ * )	UNZIPPER=gunzip ;;	# what about multi-file zips?
+    ( *:\ data )	UNZIPPER=gunzip ;;	# zip is messy, assume it here
   esac
   if ! we_have "$UNZIPPER"; then
     die "could not find '$UNZIPPER' to decompress '$1'"
@@ -88,6 +89,23 @@ if ! we_have readlink; then
   }
 fi
 
+# Usage: shorten FILE
+# Show the most concise location for FILE, relative is okay
+shorten() {
+  local PTH="$1" UP="${PWD%/*}" UP2="${PWD%/*/*}" RP PR
+  UP="../${1#$UP/}" UP2="../../${1#$UP2/}"
+  if we_have realpath; then	# full relative path to present working dir
+    RP="$(realpath --relative-to="$PWD" "$1" 2>/dev/null)"
+  fi
+  if [ "${BASH_VERSION#4.[4-9]}" != "${BASH_VERSION#[5-9].}" ]; then # 4.4 - 9.9
+    PR="$(cd "${1%/*}"; PR="\w"; echo "${PR@P}/${1##*/}")" # bash prompt abbrev
+  fi
+  for P in "${1#$PWD/}" "~/${1#$HOME/}" "$UP" "$UP2" "$RP" "$PR"; do
+    if [ "${#P}" -lt "${#PTH}" ]; then PTH="$P"; fi
+  done
+  echo "$PTH"
+}
+
 # Usage: unlink LINK
 # Traverse LINK up to two levels and make the result nicer-looking
 unlink() {
@@ -96,8 +114,8 @@ unlink() {
   F="${F2:-$F}"
   case "$F" in
     ( /proc/self/* )	F="${F#/proc/self/}" ;;	# /proc/self/fd/0 -> fd/0
-    ( /dev/fd/* )	F="${F#/dev/}" ;;	# /dev/df/0 -> fd/0
-    ( * )		F="${F#$PWD/}" ;;	# somewhat localized
+    ( /dev/fd/* ) 	F="${F#/dev/}" ;;	# /dev/df/0 -> fd/0
+    ( * )		F="$(shorten "$F")" ;;
   esac
   echo "$F"
 }
@@ -109,27 +127,32 @@ decompress() {
   : "decompress $*"
   if [ "$FILE" = "-" ]; then FILE=/dev/stdin; fi
 
-  # character device, named pipe, or symlink to either (BUG? /dev/stdin != -c)
-  if [ -c "$FILE" ] || [ -p "$FILE" ] || [ "$FILE" = /dev/stdin ]; then
-    # Read 15 bytes from the pipe to determine compression
-    HEAD="$(head -c15 "$FILE")x" # the `x` lets us retain trailing newlines
-    UNZIPPER="$(find_unzipper <<<"${HEAD%x}")"
+  # character device, named pipe, or symlink to either
+  if [ -c "$FILE" ] || [ -p "$FILE" ]; then
+    # This used to save the contents in a variable, but we can't save NUL chars
+    if [ -z "$HEAD" ]; then HEAD="$(mktemp)"; fi
+    head -c15 "$FILE" > "$HEAD"  # save first 15 bytes to examine for file type
+    UNZIPPER="$(find_unzipper "$HEAD")"
     FILENAME="$(unlink "$FILE")"
     # BUG3 - To implement `nextfile`, background the unzipper and pass its PID
     # on this line (so we can kill it from awk). Problem: we don't know it yet!
     printf "%s%s%s%s\n" "$_ZAWK_FS" "$FILENAME" "$_ZAWK_D" "$UNZIPPER" #metadata
     {
-      printf %s "${HEAD%x}"		# put back those first 15 characters
-      if [ "${#HEAD}" -ge 15 ]; then	# only if HEAD was full
+      cat "$HEAD"			# put back those first 15 bytes
+      if [ "$(wc -c < "$HEAD")" -ge 15 ]; then	# only if we read 15 bytes
         : 'BUG1 - we are running `cat` assuming there is a 16th byte to read'
         # This is a minimal risk; a blank gzip is 20B and blank xz is 32B
         cat "$FILE"			# read the rest of the pipe
       fi
     } | "$UNZIPPER"
     RETVAL=$?
+    FILE="$FILENAME"	# correct file name for the warning given exit code 1
 
   else	# input is a file or something that we'll let the decompressor error on
     UNZIPPER="$(find_unzipper "$FILE")"
+    if [ "$FILE" = "/dev/stdin" ]; then
+      FILENAME="$(unlink "$FILE")"
+    fi
     printf "%s%s%s%s\n" "$_ZAWK_FS" "$FILENAME" "$_ZAWK_D" "$UNZIPPER" #metadata
     "$UNZIPPER" < "$FILE"
     RETVAL=$?
@@ -193,7 +216,7 @@ _ZAWK_FS=$'\x1c\x01'	# file separator, start-of-heading
 _ZAWK_D=$'\x02\x1f'	# delimiter: start-of-text, unit separator
 AWK="awk"
 PROGRAM_TEXT= PROGRAM_FILE= TMP=
-trap "rm -f $TMP $PROGRAM_FILE" 0 1 2 3 4 5 6 9 11 15 18
+trap 'rm -f $TMP $HEAD $PROGRAM_FILE' 0 1 2 3 4 5 6 9 11 15 18
 
 # most of these options are from gawk and will cause an error in other awks
 while getopts bcCd:D:e:E:f:F:ghi:l:L:MnNo:Op:PrsStv:VW:-: OPT; do
@@ -261,7 +284,7 @@ done
 
 OPTS[${#OPTS[@]}]="$PROGRAM_TEXT"	# append this after all variables
 
-TMP="$(mktemp)"	# this is solely to track the last character of each input
+TMP="$(mktemp)" 	# this is solely to track the last byte of each input
 
 for FILE in "${@:--}"; do
   : "FILE=$FILE"
