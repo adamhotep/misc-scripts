@@ -10,7 +10,6 @@ This works IN-LINE so you can stream things properly.
   --awk=COMMAND  Use COMMAND instead of \`awk\` (not in mawk)
   -F REGEX       Set the field separator, FS, to REGEX (like \`-v FS=REGEX\`)
   -f FILE        Program text is read from FILE instead of command line
-  -h, --help     What you see here; see also \`man awk\` (not in mawk)
   -v ASSIGNMENT  Creates variable VAR and assigns VALUE to it
   --             This is the final option
   FILE           A file to process (default is \`-\`, which is \`/dev/stdin\`)
@@ -20,7 +19,9 @@ This works IN-LINE so you can stream things properly.
 Extra awk variables:
   UNZIPPER       The command used to decompress the current FILENAME
 
-WARNING: GNU/gawk's \`nextfile\` and other file-specific extensions won't work.
+BUG1: If a piped input is EXACTLY 15 bytes, this will awkwardly wait for more.
+BUG2: ASSIGNMENTs cannot be made between reading FILEs. They're all made first.
+BUG3: GNU/gawk's \`nextfile\` and other file-specific extensions won't work.
 
 zawk 0.2.0.20190606 Copyright 2010+ by Adam Katz, Apache License 2.0
 /help
@@ -104,22 +105,44 @@ unlink() {
 # Usage: decompress FILE
 # Print file metadata (see $FILE_KEEPER later) and the decompressed FILE
 decompress() {
-  local UNZIPPER F FILE="${1:--}" FILENAME="${1:--}"
+  local UNZIPPER F FILE="${1:--}" FILENAME="${1:--}" RETVAL
   : "decompress $*"
   if [ "$FILE" = "-" ]; then FILE=/dev/stdin; fi
 
-  # character device, named pipe, or symlink to either (BUG: /dev/stdin != -c)
+  # character device, named pipe, or symlink to either (BUG? /dev/stdin != -c)
   if [ -c "$FILE" ] || [ -p "$FILE" ] || [ "$FILE" = /dev/stdin ]; then
-    HEAD="$(head -c16 "$FILE")x" # the `x` lets us retain trailing newlines
+    # Read 15 bytes from the pipe to determine compression
+    HEAD="$(head -c15 "$FILE")x" # the `x` lets us retain trailing newlines
     UNZIPPER="$(find_unzipper <<<"${HEAD%x}")"
     FILENAME="$(unlink "$FILE")"
+    # BUG3 - To implement `nextfile`, background the unzipper and pass its PID
+    # on this line (so we can kill it from awk). Problem: we don't know it yet!
     printf "%s%s%s%s\n" "$_ZAWK_FS" "$FILENAME" "$_ZAWK_D" "$UNZIPPER" #metadata
-    { printf %s "${HEAD%x}"; cat "$FILE"; } | "$UNZIPPER"
-  else
+    {
+      printf %s "${HEAD%x}"		# put back those first 15 characters
+      if [ "${#HEAD}" -ge 15 ]; then	# only if HEAD was full
+        : 'BUG1 - we are running `cat` assuming there is a 16th byte to read'
+        # This is a minimal risk; a blank gzip is 20B and blank xz is 32B
+        cat "$FILE"			# read the rest of the pipe
+      fi
+    } | "$UNZIPPER"
+    RETVAL=$?
+
+  else	# input is a file or something that we'll let the decompressor error on
     UNZIPPER="$(find_unzipper "$FILE")"
     printf "%s%s%s%s\n" "$_ZAWK_FS" "$FILENAME" "$_ZAWK_D" "$UNZIPPER" #metadata
     "$UNZIPPER" < "$FILE"
+    RETVAL=$?
   fi
+
+  # some debug information (run me as `bash -x zawk ...`)
+  case $RETVAL in
+    ( 0 )	:    "decompressor exited normally (success)" ;;
+    ( 1 )	warn "Warning: error decompressing '$FILE'" ;;
+    ( 141 )	:    "decompressor prematurely truncated" ;;
+    ( * )	:    "unknown decompressor error $RETVAL" ;;
+  esac
+  return $RETVAL
 }
 
 # Usage: program_file
@@ -144,16 +167,19 @@ valid_assignment() {
 
 # AWK code to handle metadata and control FILENAME, FNR, NR and UNZIPPER:
 # If the first 2 chars are _ZAWK_FS && split the rest by _ZAWK_D with > 1 field:
-#   Set ZAWK_DATA[-1] to the old FILENAME; set ZAWK_DATA[-2] to old UNZIPPER
+#   If not on the first line ever, save FILENAME and UNZIPPER in ZAWK_DATA
 #   Set FILENAME to the first field; set UNZIPPER to the second field
 #   Set the file's number of records (FNR) to zero so line 1 increments properly
 #   Decrement the overall number of records (NR) because this one is metadata
 #   Done with metadata line, advance to line FNR=1 of this input
 # (No, this is not a problem if it precedes a BEGIN clause or function.)
+#
+# BUG3 - aside from the chicken & egg problem noted in decompress(), this would
+# simply be a new function (put on line one):
+#     function nextfile() { system("kill " ZAWK_DATA[3]); }
 FILE_KEEPER='
   substr($0, 1, 2) == _ZAWK_FS && split(substr($0, 3), ZAWK_DATA, _ZAWK_D) > 1 {
-    ZAWK_DATA[-1] = FILENAME;
-    ZAWK_DATA[-2] = UNZIPPER;
+    if (NR > 1) { ZAWK_DATA[-1] = FILENAME; ZAWK_DATA[-2] = UNZIPPER; }
     FILENAME = ZAWK_DATA[1];
     UNZIPPER = ZAWK_DATA[2];
     FNR = 0;
@@ -208,10 +234,13 @@ while [ -n "$1" ] && valid_assignment "$1"; do
   shift
 done
 
-# TODO: allow ASSIGNMENTs _after_ FILEs, for example:
+# BUG2: ASSIGNMENTs _between_ FILEs don't work. For example, we can't do this:
 #     $  date |awk 'FNR < 2 { print x, y, $0 }' x=1 - y=2 test
 #     1  Thu 06 Jun 2019 05:49:09 PM EDT
 #     1 2 test file output
+# I can add assignments in the file metadata, but awk doesn't have `eval` (or
+# anything safer), so the best I'd be able to do is to create a new associative
+# array and convert e.g. `x=1` into `ZAWK[x] = 1`
 #
 # Instead, this seeks assignments, sets them, and prunes them from the FILE list
 BEEN_THERE=0
@@ -222,6 +251,7 @@ for ARGUMENT in "$@"; do
     set --
   fi
   if valid_assignment "$ARGUMENT"; then
+    : "BUG2 - An ASSIGNMENT cannot be made between reading FILEs"
     warn "WARNING: '$ARGUMENT' will be assigned BEFORE opening any files"
     OPTS[${#OPTS[@]}]="-v"; OPTS[${#OPTS[@]}]="$ARGUMENT"
   else
@@ -239,15 +269,6 @@ for FILE in "${@:--}"; do
   if [ -z "$TMP" ] && [ "$(tail -c1 "$TMP")x" != $'\nx' ]; then
     printf $'\n'
   fi
-  {
-    decompress "$FILE"
-    RETVAL=$?
-    case $RETVAL in
-      ( 0 )	:    "exited normally (success)" ;;
-      ( 1 )	warn "Warning: error decompressing '$FILE'" ;;
-      ( 141 )	:    "prematurely truncated" ;;
-      ( * )	:    "unknown error $RETVAL" ;;
-    esac
-  } |tee "$TMP"
+  decompress "$FILE" |tee "$TMP"
 done | "$AWK" "${OPTS[@]}"
 
