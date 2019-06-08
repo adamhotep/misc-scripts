@@ -1,0 +1,115 @@
+#!/bin/sh
+help() {
+local c="$C0, $CB"
+cat <</help
+Usage: $CG${0##*/}$C0 [OPTIONS] FILE...
+${CR}Colored$C0 diff (using either ${CG}git --patience$C0 or else ${CG}diff$C0).
+
+  $CB-h$c--diffc-help$C0   Display this wrapper help ($CB-h$C0 must be alone)
+  $CB-0$c--no-patience$C0  Don't prefer ${CG}git$C0's patience diff
+  $CB-%$c--trunc$C0        Truncate output to the current term width.
+             ${Z:+}        This requires my ${CG:-'}trunc${C0:-0'} script.
+  $CB-5$c--no-trunc$C0     Do not truncate (overrides $CB--trunc$C0).
+
+  Further options, including $CB--help$C0, are passed directly to diff.
+
+/help
+version
+}
+
+version() {
+echo "${CG}diffc$C0 v1.0+20190602 Copyright 2010+ by Adam Katz, GPL v2+"
+echo "Part of misc-scripts:  ${CB}https://github.com/adamhotep/misc-scripts$C0"
+}
+
+# True when we have all given commands. No output.
+we_have() {
+  command -v "$@" >/dev/null 2>&1
+}
+
+# looking for colors in prompt, terminal, or environment for grep or ls
+if [ "$PS1$TERM$CLICOLOR$CLICOLOR_FORCE$LS_COLORS" = "${PS1#*}${TERM%colo}" ]
+  then COLOR=none; diffcolor() { cat; }  # no color support
+elif we_have grcat && echo test |grcat conf.diff >/dev/null 2>&1
+  then diffcolor() { grcat conf.diff; }  # color support via grc
+else
+  diffcolor() {
+    perl -e '
+     my $ydiff = 1;
+     while (<>) {
+       chomp;
+       $ydiff = 0 if /^[ <>\@+-]/ or ($. == 1 && /^\d+[a-z]{1,5}\d+$/);
+       my $color = "";
+       if (! $ydiff && /^[\@+-<>]/) {
+         $color = (/^[<-](?!--$)/ ? 1 : /^[+>]/ ? 2 : 5);
+       } elsif ($ydiff && /\t {6}([<|>])(?:\t|$)/) {
+         $color = ($1 eq "<" ? 1 : $1 eq ">" ? 2 : 4);
+       }
+       $color ? printf ("\e[1;3%dm%s\e[0;0m\n",$color,$_) : print "$_\n";
+     }
+    '
+  }
+fi
+
+if [ -n "$CLICOLOR_FORCE" ] || [ "$COLOR" != "none" -a -t 1 ]; then
+  CR="[1;31m"
+  CG="[1;32m"
+  CB="[1;34m"
+  C0="[0;0m"
+fi
+
+if [ "$*" = -h ]; then help; exit 0; fi
+
+# default:  use git with patience ... if we have git
+if we_have git; then
+  GIT=true
+fi
+
+# Avoiding getopts to allow sending arbitrary flags to true diff
+STRIP= CLEAR_ARGS=''
+for arg in ${1+"$@"}; do
+  [ -z "$CLEAR_ARGS" ] && CLEAR_ARGS=ok && set --
+  if [ "$arg" = "--" ]; then stop=true; fi
+  if [ -z "$stop" ] && [ ! -e "$arg" ]; then
+    case "$arg" in
+      ( --help )	help; echo ;;
+      ( --*help*)	help; exit 0 ;;
+      ( --no*trunc*)	NO_TRUNC=true; continue ;;
+      ( --no*pat*)	unset GIT; continue ;;
+      ( --patie*)	GIT=true; continue ;;
+      ( --strip-trailing-cr )   continue ;; # already on (GNU diff version)
+      ( --ignore-space-at-eol ) continue ;; # already on (git diff version)
+      ( --trunc*)	TRUNC=true; continue ;;
+      ( --vers*)	version ;;
+      ( --*|-*=*)	true ;;
+      ( -% )		TRUNC=true; continue ;;
+      ( -0 )		unset GIT; continue ;;
+      ( -5 )		NO_TRUNC=true; continue ;;
+      # git diff lacks -B, GNU diff supports either form, posix has neither
+      ( -B )		arg="--ignore-blank-lines" ;;
+      ( -*[%05B]*)
+        if [ "$arg" != "${arg#*%}" ]; then TRUNC=true; fi
+        if [ "$arg" != "${arg#*0}" ]; then unset GIT; fi
+        if [ "$arg" != "${arg#*5}" ]; then NO_TRUNC=true; fi
+        if [ "$arg" != "${arg#*B}" ]; then arg="--ignore-blank-lines"; fi
+        if [ "$arg" = "${arg#-*[^%05B]}" ]; then continue; fi
+        while [ "$arg" != "${arg#*[%05B]}" ]; do
+          arg="${arg%%[%05B]*}${arg#*[%05B]}"
+        done
+        ;;
+    esac
+  fi
+  set -- ${1+"$@"} "$arg"
+done
+
+if [ -z "$TRUNC" ] || [ -n "$NO_TRUNC" ] || ! we_have trunc; then
+  trunc() { cat; }
+fi
+
+if [ -n "$GIT" ]; then
+  git diff --patience --no-index --color=never \
+    --ignore-space-at-eol ${1+"$@"} |trunc |diffcolor
+else
+  diff --strip-trailing-cr "$@" |trunc |diffcolor
+fi
+

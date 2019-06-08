@@ -1,0 +1,253 @@
+#!/bin/bash
+# This uses bash for arrays, pattern substitution, and $'...' ANSI C quoting
+
+help() { cat <</help
+Usage: ${0##*/} [OPTIONS] [--] 'PROGRAM TEXT' [FILE|ASSIGNMENT ...]
+       ${0##*/} [OPTIONS] -f PROGRAM_FILE [-f...] [--] [FILE|ASSIGNMENT ...]
+Decompress input(s) and pass to awk with proper FILENAME, FNR, and NR variables.
+This works IN-LINE so you can stream things properly.
+
+  --awk=COMMAND  Use COMMAND instead of \`awk\` (not in mawk)
+  -F REGEX       Set the field separator, FS, to REGEX (like \`-v FS=REGEX\`)
+  -f FILE        Program text is read from FILE instead of command line
+  -h, --help     What you see here; see also \`man awk\` (not in mawk)
+  -v ASSIGNMENT  Creates variable VAR and assigns VALUE to it
+  --             This is the final option
+  FILE           A file to process (default is \`-\`, which is \`/dev/stdin\`)
+  ASSIGNMENT     As -v but potentially after running FILE(s)
+                 WARNING: Delayed assignment is not implemented yet
+
+Extra awk variables:
+  UNZIPPER       The command used to decompress the current FILENAME
+
+WARNING: GNU/gawk's \`nextfile\` and other file-specific extensions won't work.
+
+zawk 0.2.0.20190606 Copyright 2010+ by Adam Katz, Apache License 2.0
+/help
+  exit
+}
+
+# Usage: warn MESSAGE
+# Report 'zawk: MESSAGE' to standard error
+warn() {
+  echo "${0##*/}: ${*:-WARNING}" >&2
+}
+
+# Usage: die MESSAGE
+# As `warn MESSAGE` but also exit everything with an error code
+die() {
+  warn "${*:-ABORTING}"
+  exit 2
+}
+
+# Usage: mktemp
+# A safe temporary file (some versions of mktemp require the structure)
+mktemp() {
+  command mktemp "$@" 2>/dev/null \
+    || command mktemp "$@" "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX" 2>/dev/null
+}
+
+# Usage: we_have COMMAND[...]
+# True when we have all given command(s). No output.
+we_have() {
+  command -v "$@" >/dev/null 2>&1
+}
+
+# Usage: find_unzipper FILE
+# Name the utility that can unzip given FILE, die if we don't have it
+find_unzipper() {
+  local UNZIPPER=cat
+  case "$(file - < "${1:-/dev/stdin}")" in
+    ( *:\ bzip2\ * )	UNZIPPER=bunzip2 ;;
+    ( *:\ COMPRESS\ * )	UNZIPPER=uncompress ;;	# guess of file magic
+    ( *:\ gzip\ * )	UNZIPPER=gunzip ;;
+    ( *:\ LZ4\ * )	UNZIPPER=unlz4 ;;
+    ( *:\ LZMA\ * )	UNZIPPER=unlzma ;;
+    ( *:\ XZ\ * )	UNZIPPER=unxz ;;
+    ( *:\ Zip\ * )	UNZIPPER=gunzip ;;	# what about multi-file zips?
+  esac
+  if ! we_have "$UNZIPPER"; then
+    die "could not find '$UNZIPPER' to decompress '$1'"
+  fi
+  echo "$UNZIPPER"
+}
+
+if ! we_have readlink; then
+  # Usage: readlink [-f] LINK
+  # Print the target of given LINK, keep following given -f, limit=10
+  readlink() {
+    local CANNONICALIZE= FILE="$1" i=0
+    if [ "$1" != "${1#-f}" ]; then CANNONICALIZE="$1" FILE="$2"; fi
+    while [ -l "$FILE" ] && [ "$((i+=1))" -le 10 ]; do
+      FILE="$(ls -dl "$FILE")"
+      FILE="${FILE#* -> }"
+      if [ -z "$CANNONICALIZE" ]; then break; fi
+    done
+    echo "$FILE"
+  }
+fi
+
+# Usage: unlink LINK
+# Traverse LINK up to two levels and make the result nicer-looking
+unlink() {
+  local F2= F="$(readlink "$1")"
+  F2="$(readlink "${F:=$1}")"
+  F="${F2:-$F}"
+  case "$F" in
+    ( /proc/self/* )	F="${F#/proc/self/}" ;;	# /proc/self/fd/0 -> fd/0
+    ( /dev/fd/* )	F="${F#/dev/}" ;;	# /dev/df/0 -> fd/0
+    ( * )		F="${F#$PWD/}" ;;	# somewhat localized
+  esac
+  echo "$F"
+}
+
+# Usage: decompress FILE
+# Print file metadata (see $FILE_KEEPER later) and the decompressed FILE
+decompress() {
+  local UNZIPPER F FILE="${1:--}" FILENAME="${1:--}"
+  : "decompress $*"
+  if [ "$FILE" = "-" ]; then FILE=/dev/stdin; fi
+
+  # character device, named pipe, or symlink to either (BUG: /dev/stdin != -c)
+  if [ -c "$FILE" ] || [ -p "$FILE" ] || [ "$FILE" = /dev/stdin ]; then
+    HEAD="$(head -c16 "$FILE")x" # the `x` lets us retain trailing newlines
+    UNZIPPER="$(find_unzipper <<<"${HEAD%x}")"
+    FILENAME="$(unlink "$FILE")"
+    printf "%s%s%s%s\n" "$_ZAWK_FS" "$FILENAME" "$_ZAWK_D" "$UNZIPPER" #metadata
+    { printf %s "${HEAD%x}"; cat "$FILE"; } | "$UNZIPPER"
+  else
+    UNZIPPER="$(find_unzipper "$FILE")"
+    printf "%s%s%s%s\n" "$_ZAWK_FS" "$FILENAME" "$_ZAWK_D" "$UNZIPPER" #metadata
+    "$UNZIPPER" < "$FILE"
+  fi
+}
+
+# Usage: program_file
+# Push the FILE_KEEPER metadata handler code as a program-file before others
+program_file() {
+  if [ -z "$PROGRAM_FILE" ]; then
+    PROGRAM_FILE="$(mktemp)"
+    echo "$FILE_KEEPER" > "$PROGRAM_FILE"
+    OPTS[${#OPTS[@]}]="-f"
+    OPTS[${#OPTS[@]}]="$PROGRAM_FILE"
+  fi
+}
+
+# Usage: valid_assignment STRING
+# True when given a valid awk assignment, exit with error when not
+valid_assignment() {
+  VAR="${1%%=*}"
+  # there is an `=` and VAR neither starts with a digit nor has an invalid char
+  [ "$VAR" != "$1" ] && [ "${VAR#[0-9]}" = "${VAR#*[^A-Za-z_0-9]}" ]
+  return $?
+}
+
+# AWK code to handle metadata and control FILENAME, FNR, NR and UNZIPPER:
+# If the first 2 chars are _ZAWK_FS && split the rest by _ZAWK_D with > 1 field:
+#   Set ZAWK_DATA[-1] to the old FILENAME; set ZAWK_DATA[-2] to old UNZIPPER
+#   Set FILENAME to the first field; set UNZIPPER to the second field
+#   Set the file's number of records (FNR) to zero so line 1 increments properly
+#   Decrement the overall number of records (NR) because this one is metadata
+#   Done with metadata line, advance to line FNR=1 of this input
+# (No, this is not a problem if it precedes a BEGIN clause or function.)
+FILE_KEEPER='
+  substr($0, 1, 2) == _ZAWK_FS && split(substr($0, 3), ZAWK_DATA, _ZAWK_D) > 1 {
+    ZAWK_DATA[-1] = FILENAME;
+    ZAWK_DATA[-2] = UNZIPPER;
+    FILENAME = ZAWK_DATA[1];
+    UNZIPPER = ZAWK_DATA[2];
+    FNR = 0;
+    NR--;
+    getline
+  }
+' # WARNING, THE ABOVE AWK CODE IS COLLAPSED INTO ONE LINE. DO NOT ADD COMMENTS!
+
+declare -a OPTS
+_ZAWK_FS=$'\x1c\x01'	# file separator, start-of-heading
+_ZAWK_D=$'\x02\x1f'	# delimiter: start-of-text, unit separator
+AWK="awk"
+PROGRAM_TEXT= PROGRAM_FILE= TMP=
+trap "rm -f $TMP $PROGRAM_FILE" 0 1 2 3 4 5 6 9 11 15 18
+
+# most of these options are from gawk and will cause an error in other awks
+while getopts bcCd:D:e:E:f:F:ghi:l:L:MnNo:Op:PrsStv:VW:-: OPT; do
+  case "$OPT$OPTARG" in
+    h|-help* )	help ;;
+    -awk=?* )	AWK="${OPTARG#*=}" ;;
+    -awk* )	die "option --awk=COMMAND lacks a COMMAND" ;;
+    - ) 	break ;;
+    f*|-file=?* ) program_file; OPTS[${#OPTS[@]}]="-$OPT$OPTARG" ;;	# push
+    \? )	die ;;	# (error already provided by getopts)
+    v* )	valid_assignment "$OPTARG" || die "improper assignment: $OPTARG"
+    		OPTS[${#OPTS[@]}]="-$OPT$OPTARG" ;;	# push
+    * ) 	OPTS[${#OPTS[@]}]="-$OPT$OPTARG" ;;	# push
+  esac
+done	# the shift command for getopts is later
+shift $((OPTIND-1))
+
+if ! we_have "$AWK"; then
+  die "Invalid awk command '$AWK'"
+fi
+
+# push _ZAWK_FS and _ZAWK_D variables into awk
+OPTS[${#OPTS[@]}]="-v"; OPTS[${#OPTS[@]}]="_ZAWK_FS=$_ZAWK_FS"
+OPTS[${#OPTS[@]}]="-v"; OPTS[${#OPTS[@]}]="_ZAWK_D=$_ZAWK_D"
+
+# If no program file (which we'd have already populated), append the command
+if [ -z "$PROGRAM_FILE" ]; then
+  n=$'\n'	# pure newline; ${A//\n/} fails but ${A//$n/}
+  # Metadata handler is on one line so awk errors have the right line numbers
+  PROGRAM_TEXT="${FILE_KEEPER//$n/}	${1:-1}"
+  shift
+fi
+
+# awk also allows an ASSIGNMENT instead of a FILE:
+while [ -n "$1" ] && valid_assignment "$1"; do
+  : "while valid_assignment $1"
+  OPTS[${#OPTS[@]}]="-v"; OPTS[${#OPTS[@]}]="$1"
+  shift
+done
+
+# TODO: allow ASSIGNMENTs _after_ FILEs, for example:
+#     $  date |awk 'FNR < 2 { print x, y, $0 }' x=1 - y=2 test
+#     1  Thu 06 Jun 2019 05:49:09 PM EDT
+#     1 2 test file output
+#
+# Instead, this seeks assignments, sets them, and prunes them from the FILE list
+BEEN_THERE=0
+for ARGUMENT in "$@"; do
+  : "for \$ARGUMENT=$ARGUMENT \$@=$@"
+  if [ "$BEEN_THERE" = 0 ]; then
+    unset BEEN_THERE
+    set --
+  fi
+  if valid_assignment "$ARGUMENT"; then
+    warn "WARNING: '$ARGUMENT' will be assigned BEFORE opening any files"
+    OPTS[${#OPTS[@]}]="-v"; OPTS[${#OPTS[@]}]="$ARGUMENT"
+  else
+    set -- "$@" "$ARGUMENT"
+  fi
+done
+
+OPTS[${#OPTS[@]}]="$PROGRAM_TEXT"	# append this after all variables
+
+TMP="$(mktemp)"	# this is solely to track the last character of each input
+
+for FILE in "${@:--}"; do
+  : "FILE=$FILE"
+  # add line break after files that lacked them
+  if [ -z "$TMP" ] && [ "$(tail -c1 "$TMP")x" != $'\nx' ]; then
+    printf $'\n'
+  fi
+  {
+    decompress "$FILE"
+    RETVAL=$?
+    case $RETVAL in
+      ( 0 )	:    "exited normally (success)" ;;
+      ( 1 )	warn "Warning: error decompressing '$FILE'" ;;
+      ( 141 )	:    "prematurely truncated" ;;
+      ( * )	:    "unknown error $RETVAL" ;;
+    esac
+  } |tee "$TMP"
+done | "$AWK" "${OPTS[@]}"
+

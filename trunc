@@ -1,0 +1,132 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use open ':std', ':encoding(UTF-8)';		# handle wide characters
+use Text::Tabs;
+use Getopt::Std;
+$Getopt::Std::STANDARD_HELP_VERSION = 1;	# help output to stdout, not err
+
+$main::VERSION = "3.0.20181229";
+my ($IAM) = $0 =~ m,([^/]+)$,;	# this program's name (path removed)
+my $usage = "Usage: $IAM [OPTIONS] [FILE...]";
+
+sub main::HELP_MESSAGE {
+  print <<END_HELP;
+Truncate file(s)/stdout to display width, accounting for tabs and escape chars
+$usage
+  -c		Force coloring the last character on truncated lines
+  -C		Do not add colors or dots to truncated lines
+  -d		Use dots to denote truncated lines, does not add color
+  -D		Debug
+  -h, --help	Display this help
+  -r		Preserve right side of text rather than default of left
+  -w WIDTH	Truncate to given WIDTH
+END_HELP
+  main::VERSION_MESSAGE();
+  exit;
+}
+
+sub main::VERSION_MESSAGE {
+  print "trunc v$main::VERSION Copyright 2005+ by Adam Katz, GPL v3+\n";
+}
+
+my %opt = ();
+my $width = $ENV{COLUMNS};
+my $color = -1;
+my $end = "";
+
+getopts("cCdDhn:rw:", \%opt) or die "$usage\n";
+
+HELP_MESSAGE() if $opt{h};
+
+# color management
+my $cA = ''; my $cB = '';			# no colors (yet)
+if ($opt{d}) { $color = 0; $end = "\x{2026}"; }	# dotted delimeter: no colors
+elsif ($opt{C}) { $color = 0; } 		# explicitly no colors
+elsif ($opt{c}) { $color = 1; } 		# explicit colors
+$color = 1 if $color == -1 and -t 1;		# implicit colors (stdout=open)
+if ($color) { $cA = "\e[7;40m"; $cB = "\e\\\e[m"; }
+
+# width management
+if ($opt{w}) { $width = $opt{w}; }
+elsif (not $width) { $width = `tput cols`; }
+$width = $opt{w} if $opt{w};
+die "Invalid width '$width'\n" if $width == 0;
+$width -= length($end) + 1; 			# keep track of tail
+
+# Non-printing characters (C0, delete, C1, soft hyphen, EXCLUDES SPACE)
+# Note that we'll convert tabs (\x09) to spaces and that this excludes spaces.
+# See also https://en.wikipedia.org/wiki/C0_and_C1_control_codes
+my $nonprint = "\x00-\x1f\x7f-\x9f\xad";
+# Adding higher unicode zero-width characters. Select all and use blank cells at
+# http://kb.mozillazine.org/Network.IDN.blacklist_chars
+$nonprint   .= "\x{115f}\x{1160}\x{200b}";
+
+# Escape sequences, based on my answer at https://superuser.com/a/1388860/300293
+my $esc = qr"
+  (?:
+    # Control Sequence Introducer and the ensuing escape sequence,
+    # which includes Select Graphic Rendition sequences like colors,
+    # see https://en.wikipedia.org/wiki/ANSI_escape_code#CSI_sequences
+    \e\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]
+    |
+    # Sequences that continue until given the String Terminator (ST)
+    \e[PX^_].*?\e\\
+    |
+    # Operating System Command sequences can terminate with ST or a bell
+    \e\][^\a]*(?:\a|\e\\)
+    |
+    # Remaining singleton sequences
+    \e[\[\]A-Z\\^_@]
+    |
+    [$nonprint]+
+  )
+"x;
+
+while (<>) {
+  my $backup = $_; # preserve original so we can revert to it if narrow enough
+
+  chomp;		# remove trailing line feed
+  $_ = expand($_);	# expand tabs
+
+  my $char = my $real = 0;
+  my $new = my $unesc = my $uncolor = my $last_unesc = my $last_uncolor = "";
+
+  # loop through each ESC/printable pair
+  while (/\G($esc*+)([^$nonprint]++)/g) {
+    my $escape = $1 || "", my $print = $2;
+    if ($escape) {
+      $new .= $escape;
+      # revert colors if they change and we're not already reverting with $cB
+      $last_uncolor = $uncolor = "\e[m" if $escape =~ /\e\[/ and not $cB;
+      $last_unesc = $unesc = "\e\\";	# revert escape sequences
+    }
+    my $len = length($print);
+    $char += $len;
+    if ($opt{D}) {
+      my $ee2 = $escape; $ee2 =~ s/\e/\\e/g;
+      printf STDERR "escape=<%s>@%d print=<%s>@%d char=%d real=%d\n",
+        $ee2, length($escape), $print, $len, $char, $real;
+    }
+    if ($char <= $width) {
+      $new .= $print;
+      print STDERR "added, iterating...\n" if $opt{D};
+    } else {
+      $new .= substr($print, 0, $width - $char);
+      $new .= $unesc . $cA;
+      $new .= substr($print, $width - $char, 1);
+      $new .= $unesc . $end . $cB;
+      if ($char > $width) {
+        $new .= $unesc . $cB unless $cB eq substr($new,-1);
+        last;
+      }
+    }
+    $real += $len + length($escape);
+  }
+  $new .= $last_unesc . $last_uncolor;
+  if ($new eq $_) { $_ = $backup; }
+  else { $_ = "$new\n"; }
+  print;
+
+}
