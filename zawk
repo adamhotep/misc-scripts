@@ -101,7 +101,8 @@ shorten() {
     PR="$(cd "${1%/*}"; PR="\w"; echo "${PR@P}/${1##*/}")" # bash prompt abbrev
   fi
   for P in "${1#$PWD/}" "~/${1#$HOME/}" "$UP" "$UP2" "$RP" "$PR"; do
-    if [ "${#P}" -lt "${#PTH}" ]; then PTH="$P"; fi
+    # Note, -ef is ksh but not POSIX
+    if [ "${#P}" -lt "${#PTH}" ] && [ "$P" -ef "$PTH" ]; then PTH="$P"; fi
   done
   echo "$PTH"
 }
