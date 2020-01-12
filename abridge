@@ -9,7 +9,7 @@ Show an abridged version of the given input(s)
   version
 }
 version() {
-  echo "abridge 0.3+20171123 copyright 2016+ by Adam Katz, GPL v2+"
+  echo "abridge 0.4.20191121 copyright 2016+ by Adam Katz, GPL v2+"
   echo "https://github.com/adamhotep/misc-scripts"
   exit
 }
@@ -65,10 +65,9 @@ else
     fi
     THIS_BUNDLE="$BUNDLE"
     if [ -z "$THIS_BUNDLE" ]; then
-      THIS_BUNDLE="$(wc -l "$FILE")"
-      THIS_BUNDLE="${THIS_BUNDLE%%[^0-9]*}"
+      THIS_BUNDLE="$(wc -l < "$FILE")"
     fi
-    if [ "$THIS_BUNDLE" -le "$RATE" ]; then
+    if [ $THIS_BUNDLE -le "$RATE" ]; then
       cat "$FILE"
     else
       awk "NR % int($THIS_BUNDLE/$RATE) == 1 $ACTION" "$FILE"
