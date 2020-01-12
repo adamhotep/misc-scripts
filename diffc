@@ -1,6 +1,6 @@
 #!/bin/sh
 help() {
-local c="$C0, $CB"
+  local c="$C0, $CB"
 cat <</help
 Usage: $CG${0##*/}$C0 [OPTIONS] FILE...
 ${CR}Colored$C0 diff (using either ${CG}git --patience$C0 or else ${CG}diff$C0).
@@ -18,7 +18,7 @@ version
 }
 
 version() {
-echo "${CG}diffc$C0 v1.0+20190602 Copyright 2010+ by Adam Katz, GPL v2+"
+echo "${CG}diffc$C0 v1.1.0.20190828 Copyright 2010+ by Adam Katz, GPL v2+"
 echo "Part of misc-scripts:  ${CB}https://github.com/adamhotep/misc-scripts$C0"
 }
 
@@ -26,6 +26,16 @@ echo "Part of misc-scripts:  ${CB}https://github.com/adamhotep/misc-scripts$C0"
 we_have() {
   command -v "$@" >/dev/null 2>&1
 }
+
+# Usage: collapse FILE
+# echos new filename with FILE's collapsed content
+collapse() {
+  local TMP="$(mktemp)"
+  sed '/^[ 	]*$/d; s/[ 	][ 	]*/ /g' "$1" > "$TMP"
+  TRAP="${TRAP:-rm -f} $TMP"
+  echo "$TMP"
+}
+TRAP=
 
 # looking for colors in prompt, terminal, or environment for grep or ls
 if [ "$PS1$TERM$CLICOLOR$CLICOLOR_FORCE$LS_COLORS" = "${PS1#*}${TERM%colo}" ]
@@ -66,12 +76,13 @@ if we_have git; then
 fi
 
 # Avoiding getopts to allow sending arbitrary flags to true diff
-STRIP= CLEAR_ARGS=''
+COLLAPSE= STRIP= CLEAR_ARGS= TMP1= TMP2= TMP3=
 for arg in ${1+"$@"}; do
   [ -z "$CLEAR_ARGS" ] && CLEAR_ARGS=ok && set --
   if [ "$arg" = "--" ]; then stop=true; fi
   if [ -z "$stop" ] && [ ! -e "$arg" ]; then
     case "$arg" in
+      ( --collapse )	COLLAPSE=true; continue ;;
       ( --help )	help; echo ;;
       ( --*help*)	help; exit 0 ;;
       ( --no*trunc*)	NO_TRUNC=true; continue ;;
@@ -98,8 +109,13 @@ for arg in ${1+"$@"}; do
         done
         ;;
     esac
+  elif [ "$COLLAPSE" = true ] && [ -r "$arg" ] && [ -s "$arg" ]; then
+    if   [ -z "$TMP1" ]; then TMP1="$(collapse "$arg")"; arg="$TMP1"
+    elif [ -z "$TMP2" ]; then TMP2="$(collapse "$arg")"; arg="$TMP2"
+    elif [ -z "$TMP3" ]; then TMP3="$(collapse "$arg")"; arg="$TMP3"
+    fi
   fi
-  set -- ${1+"$@"} "$arg"
+  set -- "$@" "$arg"
 done
 
 if [ -z "$TRUNC" ] || [ -n "$NO_TRUNC" ] || ! we_have trunc; then
@@ -108,7 +124,7 @@ fi
 
 if [ -n "$GIT" ]; then
   git diff --patience --no-index --color=never \
-    --ignore-space-at-eol ${1+"$@"} |trunc |diffcolor
+    --ignore-space-at-eol "$@" |trunc |diffcolor
 else
   diff --strip-trailing-cr "$@" |trunc |diffcolor
 fi
