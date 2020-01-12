@@ -7,7 +7,7 @@ use Text::Tabs;
 use Getopt::Std;
 $Getopt::Std::STANDARD_HELP_VERSION = 1;	# help output to stdout, not err
 
-$main::VERSION = "3.0.20181229";
+$main::VERSION = "4.0.20191201";
 my ($IAM) = $0 =~ m,([^/]+)$,;	# this program's name (path removed)
 my $usage = "Usage: $IAM [OPTIONS] [FILE...]";
 
@@ -20,6 +20,7 @@ $usage
   -d		Use dots to denote truncated lines, does not add color
   -D		Debug
   -h, --help	Display this help
+  -m		Preserve right and left equally (remove from the middle)
   -r		Preserve right side of text rather than default of left
   -w WIDTH	Truncate to given WIDTH
 END_HELP
@@ -36,17 +37,27 @@ my $width = $ENV{COLUMNS};
 my $color = -1;
 my $end = "";
 
-getopts("cCdDhn:rw:", \%opt) or die "$usage\n";
+getopts("cCdDhmn:rw:", \%opt) or die "$usage\n";
+
+die "You cannot remove the middle (`-m`) and also preserve the middle (`-M`)\n"
+  if $opt{m} and $opt{M};
 
 HELP_MESSAGE() if $opt{h};
 
 # color management
-my $cA = ''; my $cB = '';			# no colors (yet)
+my $cA = my $cB = my $cD = my $c0 = '';		# no colors (yet)
 if ($opt{d}) { $color = 0; $end = "\x{2026}"; }	# dotted delimeter: no colors
 elsif ($opt{C}) { $color = 0; } 		# explicitly no colors
 elsif ($opt{c}) { $color = 1; } 		# explicit colors
 $color = 1 if $color == -1 and -t 1;		# implicit colors (stdout=open)
-if ($color) { $cA = "\e[7;40m"; $cB = "\e\\\e[m"; }
+if ($color) { $cA = "\e[7;40m"; $cB = "\e\\\e[m"; $cD = "\e[0;34m"; }
+
+sub debug {
+  return 0 unless $opt{D};
+  my @a = @_;
+  $a[0] = $cD . $a[0] . "\e[m" . "\n";
+  printf STDERR @a;
+}
 
 # width management
 if ($opt{w}) { $width = $opt{w}; }
@@ -71,6 +82,9 @@ my $esc = qr"
     # see https://en.wikipedia.org/wiki/ANSI_escape_code#CSI_sequences
     \e\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]
     |
+    # grep adds \e[K
+    \e\[K
+    |
     # Sequences that continue until given the String Terminator (ST)
     \e[PX^_].*?\e\\
     |
@@ -84,6 +98,11 @@ my $esc = qr"
   )
 "x;
 
+sub has {
+  my ($where, $what) = @_;
+  return -1 != index($where, $what);
+}
+
 while (<>) {
   my $backup = $_; # preserve original so we can revert to it if narrow enough
 
@@ -91,42 +110,107 @@ while (<>) {
   $_ = expand($_);	# expand tabs
 
   my $char = my $real = 0;
-  my $new = my $unesc = my $uncolor = my $last_unesc = my $last_uncolor = "";
+  my $unesc = my $uncolor = my $last_unesc = my $last_uncolor = "";
+  my @new = ();
+  my @new_len = ();
 
   # loop through each ESC/printable pair
   while (/\G($esc*+)([^$nonprint]++)/g) {
     my $escape = $1 || "", my $print = $2;
     if ($escape) {
-      $new .= $escape;
+      push(@new, $escape);
+      push(@new_len, 0);
       # revert colors if they change and we're not already reverting with $cB
-      $last_uncolor = $uncolor = "\e[m" if $escape =~ /\e\[/ and not $cB;
+      $last_uncolor = $uncolor = "\e[m" if has($escape, "\e[") and not $cB;
       $last_unesc = $unesc = "\e\\";	# revert escape sequences
     }
     my $len = length($print);
     $char += $len;
     if ($opt{D}) {
       my $ee2 = $escape; $ee2 =~ s/\e/\\e/g;
-      printf STDERR "escape=<%s>@%d print=<%s>@%d char=%d real=%d\n",
-        $ee2, length($escape), $print, $len, $char, $real;
+      debug("escape=<%s>@%d print=<%s>@%d char=%d real=%d",
+        $ee2, length($escape), $print, $len, $char, $real);
     }
-    if ($char <= $width) {
-      $new .= $print;
-      print STDERR "added, iterating...\n" if $opt{D};
+    if ($char <= $width or $opt{r} or $opt{m} or $opt{M}) {
+      push(@new, $print);
+      push(@new_len, $len);
+      debug("added, iterating...");
     } else {
-      $new .= substr($print, 0, $width - $char);
-      $new .= $unesc . $cA;
-      $new .= substr($print, $width - $char, 1);
-      $new .= $unesc . $end . $cB;
+      push(@new, substr($print, 0, $width - $char)
+                 . $unesc . $cA
+                 . substr($print, $width - $char, 1)
+                 . $unesc . $end . $cB);
+      push(@new_len, $width - $char);
       if ($char > $width) {
-        $new .= $unesc . $cB unless $cB eq substr($new,-1);
+        my $off = "";
+        debug("\@new=%d", scalar @new);
+        $new[scalar @new - 1] =~ /(\e\\)?(\e\[[0;]*m)?/;
+        $new[scalar @new - 1] .= "\e\\" unless $1;
+        $new[scalar @new - 1] .= "\e[m" unless $2;
         last;
       }
     }
     $real += $len + length($escape);
   }
-  $new .= $last_unesc . $last_uncolor;
-  if ($new eq $_) { $_ = $backup; }
-  else { $_ = "$new\n"; }
+  my $tmp = join("", @new);
+  debug("new=<$cB%s$cD> last_unesc=<%s> last_uncolor=<%s>",
+    join(",", @new), $last_unesc, $last_uncolor);
+  if ($char <= $width) {
+    print $backup;
+    next;
+  } elsif ($opt{r}) {	# preserve the right side
+    $tmp = "";
+    my $tmp_len = 0;
+    for (my $i = scalar @new - 1; $i >= 0; $i--) {
+      debug("width=%d tmp_len=%d new_len=%d substr=%d", $width, $tmp_len,
+        $new_len[$i], $tmp_len - $width);
+      if ($tmp_len + $new_len[$i] > $width) {
+        $tmp = $cA . substr($new[$i], $tmp_len - $width - 1, 1) . $cB
+          . ($tmp_len - $width < 0 ? substr($new[$i], $tmp_len - $width) : "")
+          . $tmp;
+        last;
+      } else {
+        $tmp = $new[$i] . $tmp;
+        $tmp_len += $new_len[$i];
+      }
+    }
+  } elsif ($opt{m}) {	# preserve the left and right sides
+    my $tmp_right = $tmp = "";
+    my $tmp_len = 0;
+    my $half = int($width / 2); 	# truncate; (82-1)/2 = 40, + 1 for dots
+    for (my $i = 0; $i < scalar @new; $i++) {
+      debug("left: i=%d half=%d width=%d tmp_len=%d new_len=%d", $i,
+        $half, $width, $tmp_len, $new_len[$i]);
+      if ($tmp_len + $new_len[$i] >= $half) {
+        debug("substr=%d", $half - $tmp_len);
+        $tmp .= substr($new[$i], 0, $half - $tmp_len + 1);
+        last;
+      } else {
+        $tmp .= $new[$i];
+        $tmp_len += $new_len[$i];
+      }
+    }
+    $half-- if $half * 2 >= $width;	# less one if we rounded earlier
+    debug("tmp=%s", $tmp);
+    $tmp_len = 0;
+    for (my $i = scalar @new - 1; $i >= 0; $i--) {
+      debug("right: i=%d half=%d width=%d tmp_len=%d new_len=%d", $i, $half,
+        $width, $tmp_len, $new_len[$i]);
+      if ($tmp_len + $new_len[$i] >= $half) {
+        debug("substr=%d", $tmp_len - $half);
+        $tmp_right = substr($new[$i], $tmp_len - $half) . $tmp_right;
+        last;
+      } else {
+        $tmp_right = $new[$i] . $tmp_right;
+        $tmp_len += $new_len[$i];
+      }
+    }
+    $tmp .= "$cA\x{2026}$cB$tmp_right";
+  } else {	# preserve the left side (done above for short-circuiting)
+    $tmp .= $last_unesc . $last_uncolor;
+  }
+  if ($tmp eq $_) { $_ = $backup; }
+  else { $_ = "$tmp\n"; }
   print;
 
 }
