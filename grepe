@@ -1,39 +1,27 @@
 #!/bin/bash
 # (bash is needed for array support)
-USAGE="Usage: ${0##*/} [OPTIONS] PATTERN [PATTERN]... [FILE]..."
-help() { cat <</help
-$USAGE
-Perform an (extended regexp) grep query with multiple patterns
+USAGE="Usage: ${0##*/} [OPTION]... [--] PATTERN [PATTERN]... [--] [FILE]..."
+help() {
+  echo "$USAGE"
+  cat <<'/help'
+Multi-pattern grep (like `grep -E PAT1\|PAT2...` or `grep -e PAT1 -e PAT2 ...`)
 
-Equivilent to: \`grep -E "PATTERN[|PATTERN]..." [FILE]...\`
-Or (with -G):  \`grep -e PATTERN [-e PATTERN]... [FILE]...\`
-
-  -@, --search=FILE      Search only these files. Other arguments are PATTERNS.
-  -E, --extended-regexp  Use extended regular expresisons (ERE, **default**)
-  -G, --basic-regexp     Use basic regular expressions (BRE)
-                         BRE is often slower because ERE can short-circuit
-      --help             Grepe help (get help on full OPTIONS: \`grep --help\`)
-  -V, --version          See what version of grepe this is
-
-Use  -@ FILE [-@ FILE]...  to interpret each non-option argument as a PATTERN.
-Use  -@-                   to examine only standard input.
+Added/removed options (see `grep --help` for a full list of options):
+  -e, --regexp=PATTERN  REMOVED, use standard grep instead
+  -f, --file=FILE       REMOVED, use standard grep instead
+  --split               Force use of the `grep -e PAT1 -e PAT2 ...` format
 
 /help
   version
 }
 
-# TODO (probably won't, see half-implemented pattern_file() code below)
-#  -f, --file=FILE        Obtain PATTERN list from FILE (interpreted by grepe)
-
 usage() {
-  if [ -n "$1" ]; then echo "${0##*/}: option '$1' requires an argument" >&2; fi
-  echo "$USAGE" >&2
-  echo "Try '${0##*/} --help' for more information." >&2
+  printf '%s\nTry `%s --help` for more information.\n' "$USAGE" "${0##*/}" >&2
   exit 2
 }
 
 version() {
-  echo 'grepe 0.3+20171123, Copyright 2010+ by Adam Katz, GPL v2+'
+  echo 'grepe 1.0.20191221, Copyright 2010+ by Adam Katz, GPL v2+'
   echo 'Part of misc-scripts:  https://github.com/adamhotep/misc-scripts'
   exit
 }
@@ -43,16 +31,16 @@ if [ "$*" = "-h" ]; then help; fi	# support literal `grepe -h` standalone
 
 # programmatically determine GNU grep's options (see below for non-GNU)
 GREP_OPTION_LIST="$(grep --help 2>&1 |awk '
-  /^ *-[a-zA-Z_0-9],/ {
+  /^ *-[a-zA-Z_0-9][ ,]/ {
     sub(/^ *-/, "")
     sub(/,.*/,"",$1)
-    printf $1
-    if(/--[^ ]*=/)	printf ":"	# option requires an argument
+    if ($2 ~ /^--[^ ]*=/) $1 = $1 ":"	# option requires an argument
+    print $1
   }
   $1 == "-NUM" {
-    printf "0123456789"
+    print "0123456789"
   }
-')"
+' |sort |xargs |sed 's/ //g')-:"
 
 # Non-GNU grep: assume solely POSIX arguments
 # via http://pubs.opengroup.org/onlinepubs/9699919799/utilities/grep.html
@@ -60,86 +48,36 @@ if [ "${#GREP_OPTION_LIST}" -lt 14 ]; then
   GREP_OPTION_LIST="EFclqinsvxe:f:"
 fi
 
-unset BRE ERE IS_DONE
+split= num= ere='-G' delim='\|' sep='--'
+args=() pat=()
 
-ARGV=("$@")			# copy of argument list
-declare -a OPTIONS FILES	# $OPTIONS and $FILES are arrays
-opts_push() {
-  for o in "$@"; do
-  # ${#VAR[@]} is VAR's length and bash arrays are zero-indexed
-    OPTIONS[${#OPTIONS[@]}]="$o"
-  done
-}
-
-# alternate for -f FILE (not used, will utterly fail on large pattern files
-# or if examining standard input)
-pattern_file() {
-  if xargs --help 2>&1 |grep .--delimiter= >/dev/null 2>&1; then
-    exec xargs --delimiter="\n" "$0" ${ARGV+"${ARGV[@]}"} < "$1"
-  else
-    awk '{printf "%s%c", $0, 0}' "$1" |xargs -0 "$0" ${ARGV+"${ARGV[@]}"}
-    exit $?
-  fi
-}
-
-
-# tacked on nonstandard -G the the beginning
-while getopts @:G$GREP_OPTION_LIST-: OPTION; do
-  case $OPTION in
-    ( @ )			FILES[${#FILES[@]}]="$OPTARG" ;;
-    #( f )			pattern_file "$OPTARG" ;;
-    ( h )			help ;;
-    ( G )			BRE=1
-      if [ "$GREP_OPTION_LIST" != "${GREP_OPTION_LIST#*G}" ]; then
-        opts_push "-G"	# only carry this through if it's in the option list
-      fi ;;
-    ( [PE] )			opts_push "-$OPTION"; unset BRE ;;
-    ( V )			version ;;
-    ( [$GREP_OPTION_LIST] )	opts_push "-$OPTION"
-      if [ -n "$OPTARG" ]; then opts_push "$OPTARG"; fi ;;
-    ( \? )			usage ;;
-    ( - ) case "$OPTARG" in
-      #( file=?* )		pattern_file "$OPTARG" ;;
-      ( file* )			usage --file ;;
-      ( help )			help ;;
-      ( search=?* )		FILES[${#FILES[@]}]="${OPTARG#*=}" ;;
-      ( search* )		usage --search ;;
-      ( ver | vers* )		version ;;
-      # Let grep complain on its own about invalid long options
-      ( * )			opts_push "--$OPTARG" ;;
-    esac ;;
+while getopts $GREP_OPTION_LIST OPT; do
+  case "$OPT$OPTARG" in
+    ( [0-9] )   	num="$num$OPT" ;;		# bug: `-1a2` = `-a -12`
+    ( [EP]|-extend*|-perl*)	ere="-$OPT" delim='|' ;;	# ERE or PCRE
+    ( [ef]* )   	echo "Use grep for \`-$OPT\`" >&2; exit 2 ;;
+    ( -file*|-regex*)	echo "Use grep for \`--${OPTARG%%=*}\`" >&2; exit 2 ;;
+    ( F|-fixed* )	ere='-F' split=1 sep='' ;;	# plaintext match
+    ( G|-basic* )	ere='-G' delim='\|' ;;		# BRE - assumes GNU grep
+    ( -help* )		help ;;
+    ( [^-]?* )  	args+=("-$OPT" "$OPTARG") ;;	# has option
+    ( -split* ) 	split=1 sep='' ;;		# no assumed GNU grep
+    ( V | -ver* )	version ;;
+    ( \? )		usage ;;
+    ( * )		args+=("-$OPT$OPTARG") ;;	# long or no option
   esac
-  unset OPTARG
 done
 shift $((OPTIND-1))
 
-for PATTERN in "$@"; do
-  if [ -z "$IS_DONE" ]; then
-    if [ "${#FILES[@]}" = 0 ] \
-      && ( [ "$PATTERN" = "--" ] || [ "$PATTERN" = "-" ] \
-           || [ -f "$PATTERN" -a -s "$PATTERN" ] || [ -c "$PATTERN" ] )
-    then
-      IS_DONE=1
-      if [ -z "$BRE" ]; then
-        opts_push "-E" "$ERE"
-      fi
-      if [ "$PATTERN" != "--" ]; then
-        opts_push "$PATTERN"
-      fi
-      continue
-    fi
-    if [ "$BRE" = 1 ]; then
-      opts_push "-e" "$PATTERN"
-      else
-      ERE="$ERE${ERE+|}$PATTERN"
-    fi
-  else
-    opts_push "$PATTERN"
-  fi
+if [ "$num" -ge 0 ]; then args+=("-$num"); fi
+
+[ "$split$ere" = 1-P ] && echo "grepe: ignoring --split for -P" >&2
+[[ "$ere" = -G && "$GREP_OPTION_LIST" != *G* ]] && ere='' split=1 sep=''
+
+while [ "$#" != 0 ] && [ ! -e "$1" ]; do	# -e needed for dirs & grep -r
+  [ "$1" = -- ] && shift && break
+  [ "$split" = 1 ] && pat+=(-e "$1") || pat="${pat:+$pat$delim}$1"
+  shift
 done
 
-if [ -z "$IS_DONE$BRE" ]; then	# command pipelines lack the cue to load the ERE
-  opts_push "-E" "$ERE"
-fi
-
-exec grep "${OPTIONS[@]}" ${FILES+"${FILES[@]}"}
+exec grep "${args[@]}" $ere $sep "${pat[@]}" "$@"
