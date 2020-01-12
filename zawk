@@ -23,7 +23,7 @@ BUG1: If a piped input is EXACTLY 15 bytes, this will awkwardly wait for more.
 BUG2: ASSIGNMENTs cannot be made between reading FILEs. They're all made first.
 BUG3: GNU/gawk's \`nextfile\` and other file-specific extensions won't work.
 
-zawk 0.2.0.20190606 Copyright 2010+ by Adam Katz, Apache License 2.0
+zawk 0.2.0.20190810 Copyright 2010+ by Adam Katz, Apache License 2.0
 /help
   exit
 }
@@ -59,14 +59,15 @@ we_have() {
 find_unzipper() {
   local UNZIPPER=cat
   case "$(file - < "${1:-/dev/stdin}")" in
-    ( *:\ bzip2\ * )	UNZIPPER=bunzip2 ;;
-    ( *:\ COMPRESS\ * )	UNZIPPER=uncompress ;;	# guess of file magic
-    ( *:\ gzip\ * )	UNZIPPER=gunzip ;;
-    ( *:\ LZ4\ * )	UNZIPPER=unlz4 ;;
-    ( *:\ LZMA\ * )	UNZIPPER=unlzma ;;
-    ( *:\ XZ\ * )	UNZIPPER=unxz ;;
-    ( *:\ Zip\ * )	UNZIPPER=gunzip ;;	# what about multi-file zips?
-    ( *:\ data )	UNZIPPER=gunzip ;;	# zip is messy, assume it here
+    ( *": bzip2 "* )	UNZIPPER=bunzip2 ;;
+    ( *": compress'd"*)	UNZIPPER=uncompress ;;
+    ( *": gzip "* )	UNZIPPER=gunzip ;;
+    ( *": LZ4 "* )	UNZIPPER=unlz4 ;;
+    ( *": LZMA "* )	UNZIPPER=unlzma ;;
+    ( *": XZ "* )	UNZIPPER=unxz ;;
+    ( *": zlib "* )	UNZIPPER=gunzip ;;
+    ( *": Zip "* )	UNZIPPER=gunzip ;;	# what about multi-file zips?
+    ( *": data" )	UNZIPPER=gunzip ;;	# zip is messy, assume it here
   esac
   if ! we_have "$UNZIPPER"; then
     die "could not find '$UNZIPPER' to decompress '$1'"
