@@ -4,8 +4,11 @@ Miscellaneous scripts, mostly for the GNU/Linux command line
 ## abridge
 Show a brief sampling of given file(s) content.
 
+## cal
+A smarter `cal` wrapper that can handle month names, 9mo view, and nearest month. Try `cal -9`.
+
 ## diffc
-Colored diff, uses git diff --patience if available
+Colored diff, uses `git diff --patience` if available
 
 ## grepe
 A smarter multi-pattern `grep` wrapper.
