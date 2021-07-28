@@ -21,7 +21,7 @@ usage() {
 }
 
 version() {
-  echo 'grepe 1.0.20191221, Copyright 2010+ by Adam Katz, GPL v2+'
+  echo 'grepe 1.0.20200124, Copyright 2010+ by Adam Katz, GPL v2+'
   echo 'Part of misc-scripts:  https://github.com/adamhotep/misc-scripts'
   exit
 }
@@ -69,7 +69,7 @@ while getopts $GREP_OPTION_LIST OPT; do
 done
 shift $((OPTIND-1))
 
-if [ "$num" -ge 0 ]; then args+=("-$num"); fi
+if [ "${num:--1}" -ge 0 ]; then args+=("-$num"); fi
 
 [ "$split$ere" = 1-P ] && echo "grepe: ignoring --split for -P" >&2
 [[ "$ere" = -G && "$GREP_OPTION_LIST" != *G* ]] && ere='' split=1 sep=''
