@@ -26,7 +26,7 @@ Usage: avg [OPTIONS] [FILE...]
   -_, --minus           Show just the mean average minus the standard deviation
 Example:  grep -w ADVANCE_FEE_2 spam.log |avg -k2
 end_help
-  print "avg v0.6+20180612 Copyright 2005+ by Adam Katz, GPL v2+\n";
+  print "avg 0.7.20210727 Copyright 2005+ by Adam Katz, GPL v2+\n";
   print "Part of misc-scripts:  https://github/adamhotep/misc-scripts\n";
 }
 
@@ -112,12 +112,18 @@ if ($do_stdev) {
 
 my $median = 0;
 if ($do_median) {
-  my $halfsize = int(scalar @input / 2); # rounds down
-  @input = sort {$a <=> $b} @input;
-  $median = $input[$halfsize];
-  if (scalar @input % 2 != 0) {
-    $median += $input[$halfsize+1]; # rounds up
-    $median /= 2;
+  if (scalar @input == 1) {
+    $median = $input[0];
+  } elsif (scalar @input == 2) {
+    $median = ($input[0] + $input[1] ) / 2;
+  } else {
+    my $halfsize = int(scalar @input / 2); # rounds down
+    @input = sort {$a <=> $b} @input;
+    $median = $input[$halfsize];
+    if (scalar @input % 2 != 0) {
+      $median += $input[$halfsize+1]; # rounds up
+      $median /= 2;
+    }
   }
 }
 
