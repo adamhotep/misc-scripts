@@ -4,6 +4,9 @@ Miscellaneous scripts, mostly for the GNU/Linux command line
 ## abridge
 Show a brief sampling of given file(s) content.
 
+## avg
+Calculate the average of a series of input numbers. Supports arithmetic mean, median, standard deviation, max, min, and sum. Numbers can be from a given field with a custom delimiter.
+
 ## cal
 A smarter `cal` wrapper that can handle month names, 9mo view, and nearest month. Try `cal -9`.
 
