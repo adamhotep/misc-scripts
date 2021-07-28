@@ -21,7 +21,7 @@ B<ls.swp> [OPTIONS] [SWAP_FILE...]
  -h      Suppress showing of swap file names
  -v      Verbose (implies -H)
 
-ls.swp 0.2+20170303 Copyright 2017+ by Adam Katz, GPL v2+
+ls.swp 0.3.20210516 Copyright 2017+ by Adam Katz, GPL v2+
 Part of misc-scripts:  https://github.com/adamhotep/misc-scripts
 
 =cut
@@ -58,6 +58,7 @@ HELP_MESSAGE() if scalar @ARGV == 1 and $ARGV[0] eq "-h"; # get help if just -h
 
 # defaults
 my $show_names = 0;
+my $show_pids = 0;
 
 my %opt = ();
 getopts("hHvV", \%opt) or die $usage;
@@ -68,7 +69,7 @@ getopts("hHvV", \%opt) or die $usage;
 #   show/hide sections: sS=swap, uU=user, hH=host, fF=file, aA=age
 #   show/hide lines:    mM=modified, rR=running
 #   and cC=color (swap file=purple, file=green, modified=red, running=yellow)
-if    ($opt{v})  { $show_names = 1; }
+if    ($opt{v})  { $show_names = $show_pids = 1; }
 elsif ($opt{H})  { $show_names = 1; }
 elsif ($opt{h})  { $show_names = 0; }	# -h is trumped by -H
 elsif (scalar @ARGV > 1) { $show_names = 1; }
@@ -105,16 +106,30 @@ foreach my $swap (@ARGV) {
   my $pid   = str2int($block0, 24, 4);
   my $user  =  substr($block0, 28, 40);
   my $host  =  substr($block0, 68, 40);
-  my $fname =  substr($block0, 108, 900);
-  ($fname, my $fenc, my $dirty) = $fname =~ /\A([^\0]+)\0+(.*)(.)\z/ms;
+  my $tmp =  substr($block0, 108, 900);
+  $tmp =~ s/(.)\z//ms;
+  my $dirty = $1;
+  my $fname = $tmp =~ s/\0.*\z//msr;
+  my $fenc = $tmp =~ s/^$fname\0+//r;
   $dirty = " (modified)" if $dirty eq "U"; # it's either U or null
   $user =~ s/\0.*//g;  # remove nulls so the following s/// and comparison work
   # vim stores user bob's home as ~bob in case another user is viewing it,
   # but we know who you are and can abbreviate accordingly
   $fname =~ s,^~$user/,~/, if $user eq $ENV{LOGNAME};
+  my $age_guess = 0;
 
+  if ($mtime == 0) {	# 1970/01/01 00:00:00 UTC is useless, use file timestamp
+    my @stat = stat($swap);
+    $mtime = $stat[9];
+    $age_guess = 1;
+  }
   my $when = time - $mtime;
-  if ($when < 90 or $opt{v}) {	# last modified <90s ago: seconds
+  if ($opt{v}) {
+    my @t = localtime($mtime);
+    $when = sprintf("%d-%02d-%02d %02d:%02d:%02d",
+              $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0]);
+  }
+  elsif ($when < 90) {	# last modified <90s ago: seconds
     $when = sprintf("%ds", $when);
   } elsif ($when < 5400) {	# last modified <90m ago: minutes
     $when = sprintf("%.0fm", $when/60);
@@ -130,12 +145,17 @@ foreach my $swap (@ARGV) {
   if ($mtime == 0) {	# 1970/01/01 00:00:00 UTC
     $when = "unknown age";
   } else {
-    $when .= " ago";
+    $when .= " ago" unless $opt{v};
+    $when .= " (guessed)" if $age_guess;
   }
 
 
   if(system("ps $pid >/dev/null") == 0) {
-    $pid = " (running)";
+    if ($show_pids) {
+      $pid = " (PID $pid)";
+    } else {
+      $pid = " (running)";
+    }
   } else {
     $pid = "";
   }
