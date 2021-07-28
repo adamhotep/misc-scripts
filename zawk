@@ -23,7 +23,7 @@ BUG1: If a piped input is EXACTLY 15 bytes, this will awkwardly wait for more.
 BUG2: ASSIGNMENTs cannot be made between reading FILEs. They're all made first.
 BUG3: GNU/gawk's \`nextfile\` and other file-specific extensions won't work.
 
-zawk 0.2.0.20190810 Copyright 2010+ by Adam Katz, Apache License 2.0
+zawk 0.2.1.20200223 Copyright 2010+ by Adam Katz, Apache License 2.0
 /help
   exit
 }
@@ -75,16 +75,20 @@ find_unzipper() {
   echo "$UNZIPPER"
 }
 
+# not posix but present nearly everwhere (GNU coreutils, BSD). Fallback:
 if ! we_have readlink; then
   # Usage: readlink [-f] LINK
-  # Print the target of given LINK, keep following given -f, limit=10
+  # Print the target of given LINK, keep following given -f, limit=100 (~0.33s)
   readlink() {
-    local CANNONICALIZE= FILE="$1" i=0
-    if [ "$1" = "-f" ]; then CANNONICALIZE="$1" FILE="$2"; fi
-    while [ -l "$FILE" ] && [ "$((i+=1))" -le 10 ]; do
-      FILE="$(ls -dl "$FILE")"
-      FILE="${FILE#* -> }"
-      if [ -z "$CANNONICALIZE" ]; then break; fi
+    local CANONICALIZE= FILE="$1" TARGET= i=0
+    case "$1" in ( -f | --canonicalize ) CANONICALIZE=1 FILE="$2" ;; esac
+    if [[ $FILE != /* ]]; then FILE="$PWD/$FILE"; fi
+    while [[ -L "$FILE" && "$((i+=1))" -le 100 ]]; do
+      TARGET="$(ls -dl "$FILE")" || break
+      TARGET="${TARGET#* $FILE -> }"
+      if [[ "$TARGET" != /* ]]; then TARGET="${FILE%/*}/$TARGET"; fi
+      if [[ -e "$TARGET" ]]; then FILE="$TARGET"; else break; fi
+      if [[ -z "$CANONICALIZE" ]]; then break; fi
     done
     echo "$FILE"
   }
@@ -99,11 +103,21 @@ shorten() {
     RP="$(realpath --relative-to="$PWD" "$1" 2>/dev/null)"
   fi
   if [ "${BASH_VERSION#4.[4-9]}" != "${BASH_VERSION#[5-9].}" ]; then # 4.4 - 9.9
-    PR="$(cd "${1%/*}"; PR="\w"; echo "${PR@P}/${1##*/}")" # bash prompt abbrev
+    PR="${1%/*}"
+    if [ -d "$PR" ]; then
+      PR="$(cd "$PR"; PR="\w"; echo "${PR@P}/${1##*/}")" # bash prompt abbrev
+    else
+      PR="$1"
+    fi
   fi
   for P in "${1#$PWD/}" "~/${1#$HOME/}" "$UP" "$UP2" "$RP" "$PR"; do
-    # Note, -ef is ksh but not POSIX
-    if [ "${#P}" -lt "${#PTH}" ] && [ "$P" -ef "$PTH" ]; then PTH="$P"; fi
+    # Note, -ef (same device & inode) is bash/dash/zsh/ksh but not POSIX
+    # Tested with `[[ /dev/stdin -ef "$(readlink -f /dev/stdin)" ]]`
+    #  * works on bash+udev  (Bash 5.0.11, Linux 5.3.0)
+    #  * FAILS on bash+devfs (Bash 4.4.23, FreeBSD 11.2)
+    if [ "${#P}" -lt "${#PTH}" ] && [ "$P" -ef "$PTH" ] 2>/dev/null; then
+      PTH="$P"
+    fi
   done
   echo "$PTH"
 }
@@ -114,12 +128,12 @@ unlink() {
   local F2= F="$(readlink "$1")"
   F2="$(readlink "${F:=$1}")"
   F="${F2:-$F}"
-  case "$F" in
+  case "${F:=$1}" in
     ( /proc/self/* )	F="${F#/proc/self/}" ;;	# /proc/self/fd/0 -> fd/0
     ( /dev/fd/* ) 	F="${F#/dev/}" ;;	# /dev/df/0 -> fd/0
     ( * )		F="$(shorten "$F")" ;;
   esac
-  echo "$F"
+  echo "${F:-$1}"
 }
 
 # Usage: decompress FILE
@@ -246,7 +260,7 @@ OPTS[${#OPTS[@]}]="-v"; OPTS[${#OPTS[@]}]="_ZAWK_D=$_ZAWK_D"
 
 # If no program file (which we'd have already populated), append the command
 if [ -z "$PROGRAM_FILE" ]; then
-  n=$'\n'	# pure newline; ${A//\n/} fails but ${A//$n/}
+  n=$'\n'	# pure newline; ${A//\n/} fails but ${A//$n/} will work
   # Metadata handler is on one line so awk errors have the right line numbers
   PROGRAM_TEXT="${FILE_KEEPER//$n/}	${1:-1}"
   shift
