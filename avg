@@ -5,7 +5,8 @@ use warnings;
 use Getopt::Long qw(:config no_ignore_case bundling);
 
 sub do_help {
-  my $action = shift; print <<'end_help' unless $action eq "version";
+  my $action = shift;
+  print <<'end_help' unless defined($action) and $action eq "version";
 Get the arithmetic mean of inputs, optionally standard deviation and/or sum
 Usage: avg [OPTIONS] [FILE...]
   -a, --add, --sum      Show sum, hide average unless std dev is to be shown
