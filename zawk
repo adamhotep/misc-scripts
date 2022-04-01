@@ -23,7 +23,7 @@ BUG1: If a piped input is EXACTLY 15 bytes, this will awkwardly wait for more.
 BUG2: ASSIGNMENTs cannot be made between reading FILEs. They're all made first.
 BUG3: GNU/gawk's \`nextfile\` and other file-specific extensions won't work.
 
-zawk 0.2.1.20200223 Copyright 2010+ by Adam Katz, Apache License 2.0
+zawk 0.3.0.20220331 Copyright 2010+ by Adam Katz, Apache License 2.0
 /help
   exit
 }
@@ -67,6 +67,7 @@ find_unzipper() {
     ( *": XZ "* )	UNZIPPER=unxz ;;
     ( *": zlib "* )	UNZIPPER=gunzip ;;
     ( *": Zip "* )	UNZIPPER=gunzip ;;	# what about multi-file zips?
+    ( *": Zstandard "*)	UNZIPPER=unzstd ;;
     ( *": data" )	UNZIPPER=gunzip ;;	# zip is messy, assume it here
   esac
   if ! we_have "$UNZIPPER"; then
@@ -190,8 +191,7 @@ program_file() {
   if [ -z "$PROGRAM_FILE" ]; then
     PROGRAM_FILE="$(mktemp)"
     echo "$FILE_KEEPER" > "$PROGRAM_FILE"
-    OPTS[${#OPTS[@]}]="-f"
-    OPTS[${#OPTS[@]}]="$PROGRAM_FILE"
+    OPTS+=(-f "$PROGRAM_FILE")
   fi
 }
 
@@ -241,11 +241,12 @@ while getopts bcCd:D:e:E:f:F:ghi:l:L:MnNo:Op:PrsStv:VW:-: OPT; do
     -awk=?* )	AWK="${OPTARG#*=}" ;;
     -awk* )	die "option --awk=COMMAND lacks a COMMAND" ;;
     - ) 	break ;;
-    f*|-file=?* ) program_file; OPTS[${#OPTS[@]}]="-$OPT$OPTARG" ;;	# push
+    f*|-file=?* ) program_file; OPTS+=("-$OPT$OPTARG") ;;
     \? )	die ;;	# (error already provided by getopts)
     v* )	valid_assignment "$OPTARG" || die "improper assignment: $OPTARG"
-    		OPTS[${#OPTS[@]}]="-$OPT$OPTARG" ;;	# push
-    * ) 	OPTS[${#OPTS[@]}]="-$OPT$OPTARG" ;;	# push
+    		OPTS+=("-$OPT$OPTARG") ;;
+    F ) 	OPTS+=("-$OPT" "$OPTARG") ;;	# support an empty FS
+    * ) 	OPTS+=("-$OPT$OPTARG") ;;
   esac
 done	# the shift command for getopts is later
 shift $((OPTIND-1))
@@ -255,12 +256,11 @@ if ! we_have "$AWK"; then
 fi
 
 # push _ZAWK_FS and _ZAWK_D variables into awk
-OPTS[${#OPTS[@]}]="-v"; OPTS[${#OPTS[@]}]="_ZAWK_FS=$_ZAWK_FS"
-OPTS[${#OPTS[@]}]="-v"; OPTS[${#OPTS[@]}]="_ZAWK_D=$_ZAWK_D"
+OPTS+=(-v _ZAWK_FS="$_ZAWK_FS" -v _ZAWK_D="$_ZAWK_D")
 
 # If no program file (which we'd have already populated), append the command
 if [ -z "$PROGRAM_FILE" ]; then
-  n=$'\n'	# pure newline; ${A//\n/} fails but ${A//$n/} will work
+  n=$'\n'	# pure newline; ${A//\n/} fails but ${A//$n/} works
   # Metadata handler is on one line so awk errors have the right line numbers
   PROGRAM_TEXT="${FILE_KEEPER//$n/}	${1:-1}"
   shift
