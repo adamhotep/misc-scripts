@@ -2,20 +2,20 @@
 help() {
   echo 'Wrapper for cal supporting month names, 9mo view, and nearest month'
   "$REAL_CAL" -h 2>&1 |sed 's/\[\[month\] /[month] [/; s/-31/-139/'
-  cat <</help
+  cat <<'/help'
 
-The \`-9\` option gives a nine-month view centered on the target month (or now).
+The `-9` option gives a nine-month view centered on the target month (or now).
 
 If just given a month, shows calendar for closest instance of given month.
-See also \`cal -m month\` to use the current year (\`-m\` bypasses this script).
-\`-m\` allows 'f' and 'p' for following and previous years given decimal months.
+See also `cal -m month` to use the current year (`-m` bypasses this script).
+`-m` allows 'f' and 'p' for following and previous years given decimal months.
 
 /help
   version
 }
 
 version() {
-  echo "cal-wrapper 0.2.20200118 copyright 2019+ by Adam Katz, GPL v2+"
+  echo "cal-wrapper 0.2.20210801 copyright 2019+ by Adam Katz, GPL v2+"
   echo "https://github.com/adamhotep/misc-scripts"
   exit
 }
@@ -97,6 +97,7 @@ if [ "$NINEMO" = 1 ]; then
   if [ -z "$pre_mo" ]; then pre_mo=$(date +%m); fi
   if [ -z "$pre_yr" ]; then pre_yr=$(date +%Y); fi
   post_yr="$pre_yr"
+  pre_mo=${pre_mo#0}	# strip leading zero when present (prevent octal math)
   post_mo=$((pre_mo + 3))
   pre_mo=$((pre_mo - 3))
   case $pre_mo in
