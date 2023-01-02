@@ -23,7 +23,7 @@ BUG1: If a piped input is EXACTLY 15 bytes, this will awkwardly wait for more.
 BUG2: ASSIGNMENTs cannot be made between reading FILEs. They're all made first.
 BUG3: GNU/gawk's \`nextfile\` and other file-specific extensions won't work.
 
-zawk 0.3.0.20220331 Copyright 2010+ by Adam Katz, Apache License 2.0
+zawk 0.3.1.20230102 Copyright 2010+ by Adam Katz, Apache License 2.0
 /help
   exit
 }
