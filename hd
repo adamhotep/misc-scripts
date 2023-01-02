@@ -1,0 +1,159 @@
+#!/bin/sh
+# Enhanced hex dump wrapper for `hd`
+# This requires the `hexdump` command-line utility.
+# Install in a higher priority part within your $PATH than other `hd` command(s)
+
+# Expand folds in vim with  z  then  R  in normal mode (or use a simpler editor)
+
+### Helper functions {{{
+
+help() {
+  #hexdump -h 2>&1 |awk 'NR > 1 || !index($0, "invalid opt")'
+  cat <</HELP
+Enhanced hex dump wrapper (colors and wide options)
+Usage: ${0##*/} [OPTIONS] [FILE...]
+OPTIONS
+  -b                One-byte octal display
+  -c                One-byte character display
+  --color[=WHEN]    Use colors to denote different character classes
+                    WHEN may be: always, auto (default), map, or never
+  --color=map       Display a mapping of what colors means what
+  -d                Two-byte decimal display
+  -e FORMAT_STRING  Specify a format string to be used for displaying data
+  -f FORMAT_FILE    Specify a format file of newline-delimited FORMAT_STRING(s)
+  -n LENGTH         Interpret only only LENGTH bytes of input
+  -o                Two-byte octal display
+  -v                Display all input data (do not compress with asterisks)
+  -w, --wide        Display 32 bytes per line
+  -x                Two-byte hexadecimal display
+
+hd-wrapper 1.0.3.20230102 Copyright 2005+ by Adam Katz, BSD 2-clause
+Part of misc-scripts:  https://github/adamhotep/misc-scripts
+/HELP
+  exit
+}
+
+color_map() {
+  cat <</COLORS
+${0##*/} wrapper color mapping:
+  ${RED}Red$OFF        Null character
+  $(   )Plain$( )      Space, printable ASCII non-alphanumeric character
+  ${YEL}Yellow$OFF     ASCII letter or number
+  ${INV}Inverted$OFF   Other ASCII and Extended ASCII (controls, other spaces)
+  ${BLU}Blue$OFF       Any other unicode character
+/COLORS
+  exit
+}
+
+die() { printf "%s${1+\n}Try ${0##*/} --help\n" "$*" >&2; exit 2; }
+
+# color filter
+_colorhd() {
+  if [ -z "$CLICOLOR_FORCE" ]; then grep ^; return $?; fi # disable: just print
+  awk -v OFF="$OFF" -v INV="$INV" -v RED="$RED" -v YEL="$YEL" -v BLU="$BLU" \
+      -v PRP="$PRP" -v CYN="$CYN" \
+  ' length($2) == 2 && block = match($0, /\|.*\|$/) {
+      count = length($1)
+      codes = substr($0, count + 1, block - count - 1)
+      code_count = (block - count) / 3
+      count = substr($0, 1, count)
+      block = substr($0, block)
+      hex = " "
+      i = 1
+      for (char = 3; $(++i) ~ /^[0-9a-fA-F][0-9a-fA-F]$/; char+=3) {
+        if (i > 2 && i % 8 == 2) { hex = hex " "; char++ }	# space every 8
+        shade = ""
+        c = substr(codes, char, 2)			# target value
+        if (c == "  ") { hex = hex "   "; continue }	# no value
+        c = ("0x" substr(codes, char, 2)) / 1		# numeric (decimal) code
+
+        if (c == 0)	shade = RED			# null is red-inverted
+        else if (c  < 32 || 126 < c && c < 161) shade = INV  # controls: invert
+        else if (c > 47 && c < 58 || c > 64 && c < 91 || c > 96 && c < 123)
+        	shade = YEL			# numbers & letters are yellow
+        else if (c > 160)	shade = BLU	# higher unicode is blue
+
+        if (shade) { hex = sprintf("%s %s%02x%s", hex, shade, c, OFF) }
+        else       { hex = sprintf("%s %02x", hex, c) }
+      }
+      if (full == 0) full = char
+      # pad the end so the ascii map lines up with prior lines
+      if (char < full) hex = sprintf("%s%*s", hex, full - char, "")
+      print PRP count OFF hex "  " CYN block OFF
+      next
+    }
+    { x=""; if (! sub(/ /, OFF "&")) x = OFF; print PRP $0 x; next }
+    END { exit ! (full > 0) }
+  '
+}
+
+### end of helper functions }}}
+
+### Parse options {{{
+
+# unique separator: start of heading (\001), <, PID, >, start of text (\002)
+# this allows us to preserve spacing from option arguments later
+SEP="<$$>"	# THIS LINE CONTAINS ESCAPE CHARACTERS. SEP="\001<$$>\002"
+ARGV= FMT=
+
+while getopts 12bcCde:f:hn:s:ovwx-: OPT; do
+  if [ "$OPT" = "-" ]; then
+    LONG_OPTARG="${OPTARG#*=}"
+    if [ "$OPTARG" = "$LONG_OPTARG" ]; then LONG_OPTARG=; fi
+  else
+    LONG_OPTARG="$OPTARG"
+  fi
+  case "$OPT-$OPTARG" in
+    ( 1|--narrow* )	WIDE=0 ;;
+    ( [2w]*|--wide* )	WIDE=1 ;;
+    ( --colo*r*=[Nn0]* | --no*colo*r* )	CLICOLOR= ;;
+    ( --colo*r*=alwa* )	CLICOLOR_FORCE=1 ;;
+    ( --colo*r*=*map* )	CLICOLOR=map ;;
+    ( --colo*r* )	CLICOLOR="${LONG_OPTARG:+1}" ;;
+    ( e*|--format=?* )	FMT=1 ARGV="$ARGV${ARGV:+$SEP}-e$LONG_OPTARG" ;;
+    ( f*|--f*file=?* )	FMT=1 ARGV="$ARGV${ARGV:+$SEP}-f$LONG_OPTARG" ;;
+    ( h*|--help* )	help ;;
+    ( n*|--len*=?* )	ARGV="$ARGV${ARGV:+$SEP}-n$LONG_OPTARG" ;;
+    ( s*|--skip=?* )	ARGV="$ARGV${ARGV:+$SEP}-s$LONG_OPTARG" ;;
+    ( -- )		break ;;
+    ( --* )		die "Illegal option $PARAM" ;;
+    ( \?* )		die ;;
+    ( * )		ARGV="$ARGV${ARGV:+$SEP}-$OPT" ;;
+  esac
+done
+shift $((OPTIND-1))
+
+if ! command -v hexdump >/dev/null 2>&1; then
+  echo "${0##*/}: ERROR, you must first install hexdump (in bsdmaintools?)" >&2
+  exit 2
+fi
+
+poe='"  " 8/1 "%02x "'	# pieces of eight
+if   [ "$WIDE" = 1 ] && [ -z "$FMT" ]; then
+  # --wide: double-wide hd, https://stackoverflow.com/a/58600201/519360
+  # to show a final line counter, prefix with:  -e '"%07.7_Ax\n"'
+  set -- -e '"%07.7_ax" '"$poe $poe $poe $poe" -e '"  |" 32/1 "%_p" "|\n"' "$@"
+elif [ -z "$FMT" ]; then
+  # recreates `hd` but without the trailing line marking the final character
+  # ... bring that back by prepending these arguments: -e '"%08.8_Ax\n"'
+  set -- -e '"%08.8_ax" '"$poe $poe" -e '"  |"16/1 "%_p""|\n"' "$@"
+fi
+
+# split $ARGV and compose final $@ with preseved spacing
+while [ -n "$ARGV" ]; do
+  set -- "${ARGV##*$SEP}" "$@"
+  if [ "$ARGV" = "${ARGV##*$SEP}" ]; then break; fi
+  ARGV="${ARGV%$SEP*}"
+done
+
+# Set colors if they're forced or if requested (and we're not piped anywhere)
+if [ -n "$CLICOLOR_FORCE" ] || [ -n "$CLICOLOR" -a -t 1 ]; then
+  # THE FOLLOWING 2 LINES HAVE AN ESCAPE CHARACTER (\033) BEFORE EACH SQ BRACKET
+  export CLICOLOR_FORCE=1 RED="[31m" YEL="[33m" BLU="[34m"
+  export PRP="[35m" CYN="[36m" INV="[7m" OFF="[m"
+  if [ "$CLICOLOR" = "map" ]; then color_map; fi
+fi
+
+### end of option parsing }}}
+
+hexdump "$@" |_colorhd
