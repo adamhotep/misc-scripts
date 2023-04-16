@@ -5,44 +5,41 @@ Given input(s), write the first line, then pass the rest to `sort`.
 
 Use `sortn -10` for 10 title lines instead. See `sort --help` for other options.
 
-sortn 0.5+20171123, Copyright 2005+ by Adam Katz, GPL v2+
+sortn 0.6.20230413, Copyright 2005+ by Adam Katz, GPL v2+
 Part of misc-scripts:  https://github.com/adamhotep/misc-scripts
 /help
 exit
 }
 
-# push given argument(s) onto the end of the args[] array
-args_push() { for a in "$@"; do args[${#args[@]}]="$a"; done; }
+args=()
 
-SKIP=
-DEFAULT_SKIP=1
+skip=
+default_skip=1
 
-if [ "$*" = -h ]; then help; fi
+if [ "$*" = -h ]; then help; fi 	# special case: just `-h` => `--help`
 
+# filter arguments for -NUMBER and --help, otherwise save them for sort
 while getopts bcCdfghik:mnNo:rRsS:t:T:uVz1234567890-: arg; do
   case "$arg" in
-    ( [0-9] )	SKIP=$SKIP$arg ;;
-    ( [koStT] )	args_push "-$arg" "$OPTARG" ;;
-    ( - )	[ "$OPTARG" = help ] && help || args_push "--$OPTARG" ;;
+    ( [0-9] )	skip="$skip$arg" ;;
+    ( [koStT] )	args+=("-$arg" "$OPTARG") ;;
+    ( - )	[ "$OPTARG" = help ] && help || args+=("--$OPTARG") ;;
     ( \? )	echo "Try --help" >&2; exit 2 ;;
-    ( * )	args_push "-$arg" ;;
+    ( * )	args+=("-$arg") ;;
   esac
 done
 shift $((OPTIND-1))
 
 main() {
-  for (( i=1; $i <= ${SKIP:-$DEFAULT_SKIP}; i++ )); do
+  for (( i=1; $i <= ${skip:-$default_skip}; i++ )); do
     IFS= read -r title
-    echo "$title"
+    printf "%s\n" "$title"
   done
 
   sort ${args[@]+"${args[@]}"}
 }
 
+# Calling `cat` enables us to accept files or pipes
 cat "$@" |main
 
 exit $?
-
-
-# >(command) is bash's outbound process substitution, a forked pipe...unreliably
-#cat ${1+"$@"} |tee >(cat |head -n$SKIP) >(sed "1,${SKIP}d" |sort ${args[@]+"${args[@]}"}) >/dev/null
