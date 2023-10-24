@@ -1,0 +1,23 @@
+#!/bin/sh
+## Drop-in replacement for the faulty/ugly psmerge program using Ghostscript
+## Usage: psmerge2 [ -oOUTPUT ] [ INPUT ... ]
+##   OUTPUT type is determined by extension:  PDF, TIFF, or PS (default)
+## psmerge2 0.6 (c) 1999-2008 Adam Katz <scriptsATkhopiscom>, GPL
+
+if [ "-${1#?}" = "$1" -a ${#1} -gt 1 ]; then	# there is a non-empty option
+  f="${1#-o}" && [ "$1" != "$f" ] && shift	# get output file name w/out -o
+  # if the above failed, we have an invalid option:  exit with --help info
+  [ $? != 0 ] && sed -e '/^## /!d' -e 's///' "`which $0 || echo $0`" && exit 0
+fi
+
+if [ -w "$f" ]; then # test if $f is writable (if not, we already get an error)
+  echo -n "${0##*/}: Overwrite existing output file \`$f' [yN]? "; read YN
+  [ "${YN#[yY]}" = "$YN" ] && echo "${0##*/}: Merge cancelled." && exit 1
+fi
+
+case ${f##*.} in # file ext dictates type; see  gs -h|sed '/devices:/,/^[^ ]/!d'
+  PDF | pdf )			d="pdfwrite -dCompatibilityLevel=1.2" ;;
+  TIFF | tiff | TIF | tif )	d="tiffg3" ;;
+esac # (default case d="pswrite" inserted below)
+
+exec gs -q -dNOPAUSE -dBATCH -sDEVICE=${d:-pswrite} -sOutputFile="${f:--}" "$@"
