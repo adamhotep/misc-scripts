@@ -1,0 +1,65 @@
+#!/bin/sh
+help() { cat <</help
+Merge PDF and similar files (PDF, PS, and TIFF) using Ghostscript
+Usage: pdfmerge [ OPTIONS ] [ INPUT ... ]
+  -o OUTPUT      Type is determined by extension: .pdf (default), .tiff, or .ps
+  -D DEVICE      Override output format with a ghostscript device
+  -V, --verbose  Verbose output
+  -x EXECUTABLE  Alternate name or path for ghostscript
+
+This is a drop-in replacement for the old psmerge program
+
+/help
+  version
+}
+
+version() {
+  echo 'pdfmerge 0.7.20231024.0, Copyright 1999+ by Adam Katz, GPL v2+'
+  echo 'Part of misc-scripts: https://github.com/adamhotep/misc-scripts'
+  exit
+}
+
+die() { echo "$*" >&2; exit 2; }	# complain to STDERR and exit with error
+
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+device=""		# default to be set later as a fallback
+ghostscript="gs"	# default ghostscript command
+quiet="-q"		# default: quiet (disabled with verbose)
+
+while getopts D:ho:vVx:-: OPT; do
+  if [ "$OPT" = - ]; then # long opt https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#$OPT}" OPTARG="${OPTARG#=}"
+  fi
+  case "$OPT" in
+    ( D | device )	needs_arg; device="$OPTARG" ;;
+    ( h | help )	help ;;
+    ( o | out* )	needs_arg; out="$OPTARG" ;;
+    ( V | verb* )	quiet="" ;;
+    ( v | ver* )	version ;;
+    ( x | exe* | gs* )	ghostscript="$OPTARG" ;;
+    ( ??* )		die "Illegal option --$OPT" ;; # bad long option
+    ( ? )		exit 2 ;; # bad short option (error reported via getopts)
+  esac
+done
+shift $((OPTIND-1))
+
+if ! command -v "$ghostscript" >/dev/null 2>&1; then
+  if [ "$ghostscript" = "${ghostscript#*/}" ]; then inpath=" in PATH='$PATH'"; fi
+  die "No Ghostscript executable found (tried '$ghostscript'$inpath), aborting"
+fi
+
+if [ -s "$out" ]; then
+  echo -n "${0##*/}: Overwrite existing output file \`$out' [yN]? "; read YN
+  [ "${YN#[yY]}" = "$YN" ] && echo "${0##*/}: Merge cancelled." && exit 1
+fi
+
+if [ -z "$device" ]; then
+  case ${out##*.} in # file ext dictates type; see  gs -h|sed '/devices:/,/^[^ ]/!d'
+    ( PS | ps )			device="pswrite" ;;
+    ( TIFF | tiff | TIF | tif )	device="tiffg3" ;;
+    ( * ) 			device="pdfwrite -dCompatibilityLevel=1.2" ;;
+  esac
+fi
+
+exec gs $quiet -dNOPAUSE -dBATCH -sDEVICE=$device -sOutputFile="${out:--}" "$@"
