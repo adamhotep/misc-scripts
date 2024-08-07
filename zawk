@@ -2,8 +2,8 @@
 # This uses bash for arrays, pattern substitution, and $'...' ANSI C quoting
 
 help() { cat <</help
-Usage: ${0##*/} [OPTIONS] [--] 'PROGRAM TEXT' [FILE|ASSIGNMENT ...]
-       ${0##*/} [OPTIONS] -f PROGRAM_FILE [-f...] [--] [FILE|ASSIGNMENT ...]
+Usage: ${0##*/} [OPTIONS] [--] 'PROGRAM TEXT' [ASSIGNMENT...] [FILE...]
+       ${0##*/} [OPTIONS] -f PROGRAM_FILE [-f...] [--] [ASSIGNMENT...] [FILE...]
 Decompress input(s) and pass to awk with proper FILENAME, FNR, and NR variables.
 This works IN-LINE so you can stream things properly.
 
