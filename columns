@@ -1,0 +1,279 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+# Auto_abbrev is disabled for our option preprocessor to function properly.
+# If you set ignore_case, add the /i regexp modifier to the preprocessor regexps
+use Getopt::Long qw(:config no_ignore_case bundling no_auto_abbrev);
+use open ':std', ':encoding(UTF-8)';		# handle wide characters
+use Text::Tabs;
+
+my $command = $0 =~ s'^.*/''gr;
+my $get_help = "Try \`$command --help\`\n";
+my %opts;
+
+sub help {
+  print "Equalize output column widths or columnate. Color & tab-safe.\n";
+  print "Usage: $command [OPTIONS] [FILE...]
+  --color[=WHEN|=CODE]  Colors for --names: 'always', 'auto' (default), 'never',
+                        or by ANSI SGR color code like '4' or '1;31' or '1,31'
+                        (color codes in the content upgrade 'auto' to 'always')
+  --delimiter=RE, -d RE Use regexp RE to split fields (currently '$opts{delim}')
+  --fillrows, -x        Fill rows before columns (implies --join)
+  --gutter=STR, -g STR  Output field separator (currently '$opts{gutter}')
+  --join, -j            Join lines into columns (like util-linux's \`column\`)
+                        (Ignores --color, --names, --num, and --shortest)
+  --left, -l            Left-align each column (default with --join)
+  --names=CSV, -N CSV   Comma-separated list of column names for a header
+  --num=NUM, -n NUM     Equalize the first NUM fields, space-delimit the rest
+                        With --join, sets a maximum number of columns
+  --right, -r           Right-align each column (default without --join)
+  --shortest, -s        Set --num to the smallest column count of any line
+                        (We otherwise default to the longest)
+  --version, -V         Display version information just like below
+  --width=NUM, -w NUM   Max width for --join (currently $opts{width})\n\n";
+  version();
+}
+
+sub version {
+  print "columns 0.5.20240602.1 Copyright 2010+ by Adam Kat, GPL v2+\n";
+  print "Part of misc-scripts: https://github.com/adamhotep/misc-scripts\n";
+}
+
+my @lengths;
+my @all;
+my $last = 0;
+my $shortest = -1;
+
+# default options
+%opts = (delim => '\\s+', gutter => ' ', limit => 0, shortest => 0);
+$opts{width} = $ENV{COLUMNS} || `tput cols` / 1;
+
+if ($ENV{NO_COLOR}) {
+  $opts{color} = "never";
+} elsif ($ENV{CLICOLOR_FORCE}) {
+  $opts{color} = "always";
+} else {
+  $opts{color} = "auto";
+}
+
+my @options =  qw/ 0 1 2 3 4 5 6 7 8 9 color|colour:s
+                   delim|delimiter|separator|d=s
+                   fillrows|x gutter|g|output-separator|o=s help|h
+                   join|j! left|l! limit|number|num|n=i
+                   names|table-names|table-column-names|table-columns|header|N=s
+                   right|r shortest|short|s table|t version|ver|V
+                   width|output-width|c|w=i /;
+
+# Getopts::Long preprocessor (redefines certain options) {{{
+if (@ARGV) {
+  # Redefined options are left to be ignored as vestigial %opts keys.
+  # Converts
+  #   -l -s1r23 --num 4 --right -- -l
+  # Into
+  #   -l -s1r23 --num 4 --right --left --num=23 --noleft --num=4 --noleft -- -l
+  my @redefined_options = ();
+  my $bool_opts = "";	# a list of single-character boolean options
+  my $assign_opts = "";
+  for (@options) {
+    # Getopt::Long option names allow anything but these five chars:  ! | + = :
+    if (/(?:^|\|)([^!|+=:])(?:\|[^!+=:]+)?[+!]*$/) { $bool_opts .= $1; }
+    elsif (/^(.*)[:=]/) { $assign_opts .= ($assign_opts ? "|" : "") . $1; }
+  }
+
+  # convert reverse options to negations of their companion options
+  # without overriding the companion options
+  # Usage: revers_option(content, reverse, option, short_reverse, short_option)
+  sub reverse_option {
+    $_ = shift;
+    my ($rev, $opt, $r, $o) = @_;
+    if (/^--(?:$rev|no-?$opt)$/ or defined $o and /^-[$bool_opts]*$r[^$o]*$/) {
+      push (@redefined_options, "--no$opt");
+    } elsif ($_ eq "--$opt" or /^-[$bool_opts]*$o[^$r]*$/) {
+      push (@redefined_options, "--$opt");
+    }
+  }
+
+  my $a = 0;
+  for (my $len = @ARGV; $a < $len; $a++) {
+    $_ = $ARGV[$a];
+    last if $_ eq "--" or $_ eq "-" or /^[^-]/;
+    # allow numbers as options, e.g. -13
+    if (/^-(?:[n0-9$bool_opts]*(?<=[^0-9])|-num=)([0-9]+)[$bool_opts]*$/) {
+      push(@redefined_options, "--num=$1");
+    } elsif (/^--?n(?:um)?$/) { # spaced variant
+      push(@redefined_options, "--num=$ARGV[$a+1]") if $a + 1 < $len;
+    }
+    reverse_option($_, "right", "left", "r", "l");
+    reverse_option($_, "table", "join", "t", "j");
+    if (/^-(?:-|[$bool_opts]*+)(?:$assign_opts)$/) {
+      $a++;
+      if ($a >= $len or $ARGV[$a] eq "--") {
+        die "Option $_ requires an argument\n$get_help";
+      }
+    }
+  }
+  splice(@ARGV, $a, 0, @redefined_options);
+}	# end Getopts::Long preprocessor }}}
+
+#print "<" . join ("> <", @ARGV) . ">\n"; exit;
+
+GetOptions(\%opts, @options) or die $get_help;
+
+$opts{join} //= $opts{fillrows};	# --fillrows implies --join
+$opts{left} //= $opts{join} || 0;	# --join defaults to being left-aligned
+$opts{limit} = 0 if $opts{shortest};
+if ($opts{limit} == 1 or $opts{limit} < 0) {
+  die "Number of columns must be 0 (infinite) or > 1\n$get_help";
+}
+
+help() and exit if $opts{help};
+version() and exit if $opts{version};
+
+sub print_length {
+  $_ = shift;
+  my $csi;
+
+  # remove ANSI escape sequences, see https://superuser.com/a/1388860/300293
+  $csi = s/\e\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]//g; # CSI seqs (colors/SGR/+)
+  s/\e[PX^_].*?\e\\//g; 		# ESC...ST seqs
+  s/\e\][^\a]*(?:\a|\e\\)//g;		# OS command seqs
+  s/\e[\x40-\x5f]//g;			# remaining ESC seqs
+  s/[\x00-\x1f\x7f-\x9f\xad]+//g;	# other non-printing/zero-width like \a
+
+  # upgrade "auto" coloring to always if we found colors
+  if ($opts{color} eq "auto" and $csi > 0) {
+    $opts{color} = "always";
+  }
+
+  return length($_);
+}
+
+sub pad {
+  my $text = shift;
+  my $len = shift;
+  # printf is a no-go due to its inability to ignore non-printing characters
+  my $space = $len - print_length($text);
+  $space = $space > 0 ? " "x$space : "";	# don't pad when negative
+  if ($opts{left}) {
+    return $text . $space;
+  } else {
+    return $space . $text;
+  }
+}
+
+
+if ($opts{join}) {
+  my $longest = 0;
+  while (<>) {
+    chomp;
+    push (@all, expand($_));	# expand tabs to spaces
+    my $l = print_length($_);
+    push (@lengths, $l);
+    if ($l > $longest) { $longest = $l; }
+  }
+  my $gutter_len = print_length($opts{gutter});
+  if ($opts{fillrows}) {
+    my $char = 0;
+    my $col = 0;
+    for (my $i = 0; $i < @all; $i++) {
+      if ($char > 0) { print $opts{gutter}; $char += $gutter_len; }
+      if ($i + 1 == @all or ($opts{limit} > 0 and ++$col >= $opts{limit})
+          or $char + $longest * 2 + $gutter_len > $opts{width})
+      {
+        if ($opts{left}) {
+          print "$all[$i]\n";
+        } else {
+          print pad($all[$i], $longest) . "\n";
+        }
+        $char = $col = 0;
+        next;
+      }
+      print pad($all[$i], $longest);
+      $char += $longest;
+    }
+  } else {
+    # account for a gutter on every column except the last
+    my $cols = int( ($opts{width} + $gutter_len) / ($longest + $gutter_len) );
+    $cols = $opts{limit} if $opts{limit} < $cols and $opts{limit} > 1;
+    my $rows = int(@all / $cols + 1);
+    for (my $i = 0; $i < $rows; $i++) {
+      for my $j (0 .. $cols) {
+        if (@all > $i+$rows*$j) {
+          print pad($all[$i+$rows*$j], $longest);
+          print $opts{gutter} if $j < $cols - 1;
+        }
+      }
+      print "\n";
+    }
+  }
+
+  exit;
+}
+
+# VERY LIMITED safeties for the regex to split on
+# `(?{ code })`, `(*{ code})`, and `(??{ code })` are forbidden
+if ($opts{delim} =~ /\((?:\?\??|\*)\{/) {
+  die "Regex safeties rejected '$opts{delim}'. Try to be less clever.\n";
+}
+
+while (<>) {
+  chomp;
+  my @line = split(qr/$opts{delim}/);
+  for (my $i = 0; $i < @line; $i++) {
+    my $len = print_length($line[$i]);
+    if (not defined $lengths[$i] or $len > $lengths[$i]) {
+      $lengths[$i] = $len;
+    }
+  }
+  $last = @line if @line > $last;
+  if ($opts{shortest} and ($shortest == -1 || @line < $shortest)) {
+    $shortest = @line;
+  }
+  push @all, [ @line ];
+}
+
+if ($opts{names}) {
+
+  if ($opts{color} =~ /^auto$|tty/i) {	# note, may have been upgraded above
+    if (-t 1) { $opts{color} = "always"; }		# if a TTY is open
+    else { $opts{color} = "never"; }
+  }
+  if ($opts{color} =~ /^[nN]|^0$/) {			# never/no/0 color
+    $opts{color} = "";
+  } elsif ($opts{color} =~ /^[0-9](?:[,;][0-9]+)*$/) {	# ANSI color code
+    $opts{color} =~ tr/,/;/;	# accept commas as semi-colons for CLI ease
+  } elsif ($opts{color} =~ /^$|^always$|^[Yy]|^forc/) { # always/yes/force color
+    $opts{color} = 4; }	# underline
+  else {
+    die "Color must be 'always', 'auto', 'never', or an ANSI SGR code.\n";
+  }
+
+  # allow backslash-escaped commas by swapping `\,` with a different escape code
+  # (also ensure we're not matching an escaped backslash before the comma)
+  my $esc = "\x1f$$\x1f";
+  my @names = split(',', $opts{names} =~ s/(?<!\\)(?:\\\\)*\K\\,/$esc/gr);
+  for (my $n = 0; $n < @names; $n++) {
+    my $len = print_length($names[$n]);
+    $lengths[$n] = $len if not defined $lengths[$n] or $len > $lengths[$n];
+    $names[$n] =~ s/$esc/,/g;
+    if ($opts{color}) {
+      $names[$n] = "\e[$opts{color}m" . pad($names[$n], $lengths[$n]) . "\e[m";
+    }
+  }
+  unshift(@all, [ @names ]);
+}
+
+$last = $opts{limit} + 1 if $opts{limit};
+$last = $shortest if $opts{shortest};
+
+for my $line (0 .. $#all) {
+  for my $i (0 .. $#{$all[$line]}) {
+    print $opts{gutter} if $i > 0;
+    if ($i >= $last - 1) {
+      print $all[$line][$i];
+    } else {
+      print pad($all[$line][$i], $lengths[$i]);
+    }
+  }
+  print "\n";
+}
