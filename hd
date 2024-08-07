@@ -5,154 +5,237 @@
 
 # Expand folds in vim with  z  then  R  in normal mode (or use a simpler editor)
 
-### Helper functions {{{
+# Helper functions {{{
 
-help() {
-  #hexdump -h 2>&1 |awk 'NR > 1 || !index($0, "invalid opt")'
-  cat <</HELP
+help() { cat <</help
 Enhanced hex dump wrapper (colors and wide options)
 Usage: ${0##*/} [OPTIONS] [FILE...]
 OPTIONS
-  -b                One-byte octal display
-  -c                One-byte character display
+  -1, --narrow      Display the canonical 16 bytes per line (default)
   --color[=WHEN]    Use colors to denote different character classes
-                    WHEN may be: always, auto (default), map, or never
-  --color=map       Display a mapping of what colors means what
-  -d                Two-byte decimal display
-  -e FORMAT_STRING  Specify a format string to be used for displaying data
-  -f FORMAT_FILE    Specify a format file of newline-delimited FORMAT_STRING(s)
+                    WHEN may be: always, auto (default), map (help), or never
+  --help-colors     Display a mapping of what colors means what (--color=map)
   -n LENGTH         Interpret only only LENGTH bytes of input
-  -o                Two-byte octal display
+  -U, --no-unicode  Disable inserting Unicode stand-ins for non-printing chars
   -v                Display all input data (do not compress with asterisks)
   -w, --wide        Display 32 bytes per line
-  -x                Two-byte hexadecimal display
 
-hd-wrapper 1.0.3.20230102 Copyright 2005+ by Adam Katz, BSD 2-clause
-Part of misc-scripts:  https://github/adamhotep/misc-scripts
-/HELP
+/help
+  version
+}
+
+version() {
+  printf %s "Using "
+  hexdump --version 2>/dev/null || man hexdump 2>/dev/null |awk '
+    END { sub(/   +.*/, ""); if (NR) print "hexdump from", $0 }'
+  echo "Part of misc-scripts:  https://github/adamhotep/misc-scripts"
+  echo "hd-wrapper 2.0.20240721.1 Copyright 2005+ by Adam Katz," \
+       "GPLv3+ / BSD 2-clause"
+  exit
+}
+
+changelog() { cat <</changelog
+Change log:
+
+1.0.3.20230102 First git commit, changes unknown (iirc, color support)
+2.0.20240721.0 Better option parsing, Unicode, new color map, spacing bugfix
+/changelog
   exit
 }
 
 color_map() {
+  x= null_disclaimer= iso_8859_1=
+  if [ "$unicode" != 1 ]; then
+    null_disclaimer=" (rendered as ${red}0$off)"
+  else
+    iso_8859_1=" (rendered in UTF-8 as if ISO-8859-1)"
+  fi
   cat <</COLORS
 ${0##*/} wrapper color mapping:
-  ${RED}Red$OFF        Null character
-  $(   )Plain$( )      Space, printable ASCII non-alphanumeric character
-  ${YEL}Yellow$OFF     ASCII letter or number
-  ${INV}Inverted$OFF   Other ASCII and Extended ASCII (controls, other spaces)
-  ${BLU}Blue$OFF       Any other unicode character
+  ${red}Inverted Red$off  Null character$null_disclaimer
+  ${x# }Plain${x}         ASCII letter
+  ${yel}Yellow$off        ASCII number
+  ${cyn}Cyan$off          Space, printable ASCII non-alphanumeric character
+  ${inv}Inverted$off      Other ASCII & Extended ASCII (controls, other spaces)
+  ${blu}Blue$off          Any other unicode character$iso_8859_1
 /COLORS
   exit
 }
 
-die() { printf "%s${1+\n}Try ${0##*/} --help\n" "$*" >&2; exit 2; }
+die() {
+  printf '%s\n' "$@" >&2
+  [ $# -lt 2 ] && echo "Try ${0##*/} --help" >&2
+  exit 2
+}
 
-# color filter
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+save_arg() { argv="$argv${argv:+$sep}-$long$OPT$OPTARG"; }
+
+### end of helper functions }}}
+
+# Color filter {{{
 _colorhd() {
-  if [ -z "$CLICOLOR_FORCE" ]; then grep ^; return $?; fi # disable: just print
-  awk -v OFF="$OFF" -v INV="$INV" -v RED="$RED" -v YEL="$YEL" -v BLU="$BLU" \
-      -v PRP="$PRP" -v CYN="$CYN" \
-  ' length($2) == 2 && block = match($0, /\|.*\|$/) {
+  if [ -z "$CLICOLOR_FORCE" ] || [ -n "$unsupported" ]; then  # no color/support
+    grep ^
+    return $?
+  fi
+  awk -v red="$red" -v yel="$yel" -v blu="$blu" -v prp="$prp" -v cyn="$cyn" \
+      -v inv="$inv" -v off="$off" -v unicode=$unicode '
+    # update blockarr[] with string str, shade ss, and at position ii
+    function swap(str, ss, ii) {
+      if (!ii) ii = i			# ii uses i when unspecified
+      if (ss) shade = ss		# SETS shade when ss *is* specified
+      if (!str) str = blockarr[ii]	# default str to the current value
+      blockarr[ii] = off
+      if (shade != off) blockarr[ii] = blockarr[ii] shade
+      blockarr[ii] = blockarr[ii] str cyn
+    }
+    length($2) == 2 && block = match($0, /\|.*\|$/) {
       count = length($1)
       codes = substr($0, count + 1, block - count - 1)
-      code_count = (block - count) / 3
+      space = sprintf("%*s", 1 + length(codes) - match(codes, / +$/), "")
       count = substr($0, 1, count)
-      block = substr($0, block)
+      blocklen =  split(substr($0, block), blockarr, "")
+      swap("", prp, blocklen)	# color the last character of the block
       hex = " "
       i = 1
       for (char = 3; $(++i) ~ /^[0-9a-fA-F][0-9a-fA-F]$/; char+=3) {
         if (i > 2 && i % 8 == 2) { hex = hex " "; char++ }	# space every 8
-        shade = ""
+        shade = cyn
         c = substr(codes, char, 2)			# target value
         if (c == "  ") { hex = hex "   "; continue }	# no value
         c = ("0x" substr(codes, char, 2)) / 1		# numeric (decimal) code
 
-        if (c == 0)	shade = RED			# null is red-inverted
-        else if (c  < 32 || 126 < c && c < 161) shade = INV  # controls: invert
-        else if (c > 47 && c < 58 || c > 64 && c < 91 || c > 96 && c < 123)
-        	shade = YEL			# numbers & letters are yellow
-        else if (c > 160)	shade = BLU	# higher unicode is blue
+        if (c == 0) {					# null is inverted red
+          if (unicode) swap("\xe2\x90\x80", red)
+          else swap("0", red)
+        }
+        else if (c  < 32 || 126 < c && c < 160) {	# controls: invert
+          shade = inv
+          if (unicode) {
+            if (c < 32) 	swap(sprintf("\xe2\x90%c", c + 128)) # C0 code
+            else if (c == 0x7f)	swap("\xe2\x90\xa1")		# delete
+            else		swap(".")
+          }
+          else	swap(".")
+        } else if (c > 47 && c < 58) {		# numbers are yellow
+          swap("", yel)
+        } else if (c > 64 && c < 91 || c > 96 && c < 123) {	# white letters
+          swap("", off)
+        } else if (c >= 160) {			# higher unicode is blue
+          shade = blu
+          if (c == 160) swap(" ")		# no-break space -> space
+          else if (unicode && c < 192)	swap(sprintf("\xc2%c", c))
+          else if (unicode)		swap(sprintf("\xc3%c", c - 64))
+          else		swap(".")
+        } else {
+          swap()
+        }
 
-        if (shade) { hex = sprintf("%s %s%02x%s", hex, shade, c, OFF) }
+        if (shade) { hex = sprintf("%s %s%02x%s", hex, shade, c, off) }
         else       { hex = sprintf("%s %02x", hex, c) }
       }
       if (full == 0) full = char
-      # pad the end so the ascii map lines up with prior lines
-      if (char < full) hex = sprintf("%s%*s", hex, full - char, "")
-      print PRP count OFF hex "  " CYN block OFF
+      block = ""
+      for (i = 1; i <= blocklen; i++) block = block blockarr[i]
+      print prp count off hex space prp block off
       next
     }
-    { x=""; if (! sub(/ /, OFF "&")) x = OFF; print PRP $0 x; next }
+    { x=""; if (! sub(/ /, off "&")) x = off; print prp $0 x; next }
     END { exit ! (full > 0) }
   '
 }
 
-### end of helper functions }}}
+### end of color filter _colorhd() }}}
 
-### Parse options {{{
+# Parse options {{{
 
-# unique separator: start of heading (\001), <, PID, >, start of text (\002)
-# this allows us to preserve spacing from option arguments later
-SEP="<$$>"	# THIS LINE CONTAINS ESCAPE CHARACTERS. SEP="\001<$$>\002"
-ARGV= FMT=
+# Unique separator: start of heading (\x01), <, PID, >, start of text (\x02)
+# This allows us to preserve spacing from option arguments later
+sep="<$$>"	# THIS LINE CONTAINS ESCAPE CHARACTERS. sep="\x01<$$>\x02"
+argv= canonical= map= unicode=1 unsupported=
 
-while getopts 12bcCde:f:hn:s:ovwx-: OPT; do
-  if [ "$OPT" = "-" ]; then
-    LONG_OPTARG="${OPTARG#*=}"
-    if [ "$OPTARG" = "$LONG_OPTARG" ]; then LONG_OPTARG=; fi
-  else
-    LONG_OPTARG="$OPTARG"
+# Load default colors from the environment
+if [ -n "$NO_COLOR" ]; then
+  color=never
+elif [ -n "$CLICOLOR_FORCE" ]; then
+  color=always
+else	# default to auto as if $CLICOLOR is on (you're here for color, right?)
+  color=auto
+fi
+
+while getopts 12bcCde:f:hLn:s:oUvVwx-: OPT; do
+  long=
+  if [ "$OPT" = - ]; then  # --long, https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#"$OPT"}" OPTARG="${OPTARG#=}" long="-"
   fi
-  case "$OPT-$OPTARG" in
-    ( 1|--narrow* )	WIDE=0 ;;
-    ( [2w]*|--wide* )	WIDE=1 ;;
-    ( --colo*r*=[Nn0]* | --no*colo*r* )	CLICOLOR= ;;
-    ( --colo*r*=alwa* )	CLICOLOR_FORCE=1 ;;
-    ( --colo*r*=*map* )	CLICOLOR=map ;;
-    ( --colo*r* )	CLICOLOR="${LONG_OPTARG:+1}" ;;
-    ( e*|--format=?* )	FMT=1 ARGV="$ARGV${ARGV:+$SEP}-e$LONG_OPTARG" ;;
-    ( f*|--f*file=?* )	FMT=1 ARGV="$ARGV${ARGV:+$SEP}-f$LONG_OPTARG" ;;
-    ( h*|--help* )	help ;;
-    ( n*|--len*=?* )	ARGV="$ARGV${ARGV:+$SEP}-n$LONG_OPTARG" ;;
-    ( s*|--skip=?* )	ARGV="$ARGV${ARGV:+$SEP}-s$LONG_OPTARG" ;;
-    ( -- )		break ;;
-    ( --* )		die "Illegal option $PARAM" ;;
+  case "$OPT" in
+    ( [bcdoxX] | one-by* | two-by* )	unsupported=1; save_arg ;;
+    ( 1 | narrow )	wide=0 ;;
+    ( [2w] | wide )	wide=1 ;;
+    ( C | canonical )	canonical=1 wide=0; save_arg ;;
+    ( change* ) 	changelog ;;
+    ( [ef] | format* )	unsupported=1; needs_arg; save_arg ;;
+    ( help*colo*r* )	map=1 ;;
+    ( h | help* )	help ;;
+    ( L | color )	color="${OPTARG:-always}" ;;
+    ( n | length )	needs_arg; save_arg ;;
+    ( s | skip )	needs_arg; save_arg ;;
+    ( U | no-unicode )	unicode=0 ;;
+    ( V | version )	version ;;
     ( \?* )		die ;;
-    ( * )		ARGV="$ARGV${ARGV:+$SEP}-$OPT" ;;
+    ( ??* )		die "Illegal option $OPT" ;;
+    ( * )		save_arg ;;
   esac
 done
 shift $((OPTIND-1))
 
-if ! command -v hexdump >/dev/null 2>&1; then
-  echo "${0##*/}: ERROR, you must first install hexdump (in bsdmaintools?)" >&2
-  exit 2
+if ! command -v hexdump >/dev/null; then
+  if command -v busybox >/dev/null && busybox --list |grep -qFx hexdump; then
+    hexdump() { busybox hexdump "$@"; }
+  else
+    die "ERROR, hexdump is not installed (consider bsdmaintools or busybox)"
+  fi
 fi
 
 poe='"  " 8/1 "%02x "'	# pieces of eight
-if   [ "$WIDE" = 1 ] && [ -z "$FMT" ]; then
+if   [ "$wide" = 1 ] && [ -z "$unsupported$canonical" ]; then
   # --wide: double-wide hd, https://stackoverflow.com/a/58600201/519360
   # to show a final line counter, prefix with:  -e '"%07.7_Ax\n"'
   set -- -e '"%07.7_ax" '"$poe $poe $poe $poe" -e '"  |" 32/1 "%_p" "|\n"' "$@"
-elif [ -z "$FMT" ]; then
+elif [ -z "$unsupported$canonical" ]; then
   # recreates `hd` but without the trailing line marking the final character
   # ... bring that back by prepending these arguments: -e '"%08.8_Ax\n"'
+  # (this is the same thing as the -C flag, so we avoid duplicating the output)
   set -- -e '"%08.8_ax" '"$poe $poe" -e '"  |"16/1 "%_p""|\n"' "$@"
 fi
 
-# split $ARGV and compose final $@ with preseved spacing
-while [ -n "$ARGV" ]; do
-  set -- "${ARGV##*$SEP}" "$@"
-  if [ "$ARGV" = "${ARGV##*$SEP}" ]; then break; fi
-  ARGV="${ARGV%$SEP*}"
+# Split $ARGV and compose final $@ with preseved spacing
+while [ -n "$argv" ]; do
+  set -- "${argv##*$sep}" "$@"
+  if [ "$argv" = "${argv##*$sep}" ]; then break; fi
+  argv="${argv%$sep*}"
 done
 
-# Set colors if they're forced or if requested (and we're not piped anywhere)
-if [ -n "$CLICOLOR_FORCE" ] || [ -n "$CLICOLOR" -a -t 1 ]; then
-  # THE FOLLOWING 2 LINES HAVE AN ESCAPE CHARACTER (\033) BEFORE EACH SQ BRACKET
-  export CLICOLOR_FORCE=1 RED="[31m" YEL="[33m" BLU="[34m"
-  export PRP="[35m" CYN="[36m" INV="[7m" OFF="[m"
-  if [ "$CLICOLOR" = "map" ]; then color_map; fi
+case $color in
+  ( always | auto | never )	: "color '$color' is valid" ;;
+  ( map | help )		color=auto map=1 ;;
+  ( yes | 1 )			color=always ;;
+  ( no | 0 )			color=never ;;
+  ( tty | TTY | default )	color=auto ;;
+  ( * ) 			die "Invalid color '$color'" ;;
+esac
+
+if [ "$color" = always ] || [ "$color" = auto -a -t 1 ]; then
+  # THE FOLLOWING 2 LINES HAVE AN ESCAPE CHARACTER (\x1b) BEFORE EACH SQ BRACKET
+  export CLICOLOR_FORCE=1 CLICOLOR=1 red="[47;31m" yel="[0;33m"
+  export blu="[0;34m" prp="[0;35m" cyn="[0;36m" inv="[7m" off="[m"
+  unset NO_COLOR
+else
+  export NO_COLOR=1 CLICOLOR_FORCE= CLICOLOR=
 fi
+
+if [ -n "$map" ]; then color_map; fi
 
 ### end of option parsing }}}
 
