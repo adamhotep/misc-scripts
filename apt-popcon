@@ -1,0 +1,207 @@
+#!/bin/sh
+help() { GREP_COLORS='ms=1' grep --color=$color -e '\bpattern\b' -e ^ <</help
+Find Debian popularity contest data for packages matching given query
+Usage: apt-popcon [options] pattern [pattern...]
+
+  -c, --cached          Use the cache even if it's old
+  -C, --cache-age=DAYS  Fetch popularity if cache isn't this young (default 1)
+  --color[=WHEN]        Wuen to use colors: 'auto' (default)
+                        or 'always' (implied by \`--color\`) or 'never'
+                        This overrides \$CLICOLOR and \$CLICOLOR_FORCE
+  -t, --truncate=0      Do not truncate output width (identical to \`-w 0\`)
+  -w, --truncate[=COLS] Width to truncate output to (default \$COLUMNS)
+  -u, --url=URL         Use this instead of $url
+
+  pattern               A regular expression handed to \`apt search\`
+                        If apt isn't present, match directly against the data
+
+/help
+  version
+}
+
+version() {
+  echo "A part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "apt-popcon 0.5.20240806.0 copyright 2010+ by Adam Katz, GPLv3+"
+  exit
+}
+
+die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
+
+we_have() { command -v "$1" >/dev/null 2>&1; }
+
+cache_age=1	# default: max 1 day age for cache
+url='https://popcon.debian.org/by_inst.gz'
+if [ -z "$COLUMNS" ] || ! [ "$COLUMNS" -gt 70 ]; then
+  COLUMNS="$(we_have tput && tput cols 2>/dev/null || echo 80)"; fi
+width="$COLUMNS"
+
+# Colors
+if [ -n "$NO_COLOR" ]; then	# environment forces colors off
+  color=never
+elif [ -n "$CLICOLOR_FORCE" ]; then	# environment forces colors on
+  color=always
+else	# environment requests colors on or is unspecified (our default = on)
+  color=auto
+fi
+
+while getopts cC:htvVw:-: OPT; do
+  if [ "$OPT" = "-" ]; then # long, https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}"; OPTARG="${OPTARG#$OPT}"; OPTARG="${OPTARG#=}"
+  fi
+  case "$OPT" in
+    ( c | C | cache* )	cache_age="${OPTARG:-3653}" ;;	# 10y if unspecified
+    ( colo*r )		color="${OPTARG:-always}" ;;
+    ( h | help* )	help ;;
+    ( t | trunc* )	width="${OPTARG:-0}" ;;
+    ( [vV] | ver* )	version ;;
+    ( w | wid* )	width="${OPTARG:-$COLUMNS}" ;;
+    ( ??* )		die "Illegal option --$OPT" ;;	# bad long option
+    ( ? )		exit 2 ;;	# bad short option (text via getopts)
+  esac
+done
+shift $((OPTIND-1))
+
+case "$color" in
+  ( auto )			[ ! -t 1 ]; color=$? ;;	# color if interactive
+  ( [nN]* | [Ff] | false )	color=0 ;;		# never color
+  ( [1AaYy]* | [Tt] | true )	color=1 ;;		# always color
+  ( * ) 	die 'Color must be `always` or `never` or `auto`' ;;
+esac
+if [ $color = 1 ]; then
+  c1='\033[7m' c0='\033[0m'
+fi
+
+if [ -z "$1" ]; then
+  die "Missing arguments ... try --help"
+fi
+
+
+if we_have apt; then
+  apt_search() { apt search "$@" 2>/dev/null; }
+  #absolute="-F" # grep -F for absolute text
+elif we_have apt-cache; then
+  apt_search() { apt-cache search "$@" 2>/dev/null; }
+  #absolute="-F" # grep -F for absolute text
+#elif we_have yum; then
+#  apt_search() { yum "$@"; } # need to test this
+#elif we_have pkg_info && [ -d /usr/ports ]; then
+#  apt_search() { # need to test this
+#    shift
+#    #find /usr/ports/*/ -maxdepth 2 -name pkg-descr |xargs grep -il "$@" \
+#    #  |sed 's:/usr/ports/::; s:/pkg-descr::'
+#    find /usr/ports/*/ -maxdepth 1 |grep -i "$@" |sed 's:.*/::g'
+#  }
+else
+  apt_search() { shift; for pkg in "$@"; do echo "$pkg"; done; }
+fi
+
+# Usage: age_okay FILE MAX_AGE_IN_DAYS MIN_SIZE
+age_okay() {
+  found="$(find "$1" -mtime -"${2:-1}" -size +"${3:-1M}")" || return $?
+  [ -n "$found" ]
+}
+
+CACHE="$HOME/.cache"
+if [ ! -d "$CACHE" ]; then
+  mkdir "$CACHE" || die "Couldn't create cache directory"
+  chmod 750 "$CACHE" 2>/dev/null
+fi
+CACHE="$CACHE/apt-popcon"
+
+# if cache is empty or is too old (and we're online), get it anew
+if age_okay "$CACHE" "$cache_age" 1M; then
+
+  if ! we_have wget; then
+    die "You need wget to fetch the popularity data"
+  fi
+
+  # download to a temp file
+  wget -qqO- --timeout=1 "$url" |gunzip >"$CACHE.new"
+  if age_okay "$CACHE.new" 14; then
+    mv "$CACHE.new" "$CACHE"
+  else
+    rm -f "$CACHE.new"
+    if [ -s "$CACHE" ]; then extra="Try running with '--cached'"; fi
+    die "Couldn't verify new popularity data. $extra"
+  fi
+fi
+
+apt_search "$@" |awk -F '[ \t/:]+' -v c1="$c1" -v c0="$c0" -v width="$width" '
+  function save_max(where, new) {
+    len = length(new)
+    if (len > max[where]) { max[where] = len }
+  }
+  # apt output: col 1 is package name, skip indented descriptions in apt search
+  NR == FNR && NF > 1 && ! /^ / { get[$1] = 1 }
+  NR == FNR || NF < 8 { next }	# skip if search or too few fields for cache
+  NR > FNR && get[$2] || $1 == "#rank" {  # cache list of packages (or title)
+    hit++
+    rank[hit]    = $1; save_max("rank",   $1)
+    if ($1 == "#rank" && $7 == "no-files") {
+      $7 = "files"
+      rank[hit] = c1 $1
+    }
+    name[hit]    = $2; save_max("name",   $2)
+    inst[hit]    = $3; save_max("inst",   $3)
+    vote[hit]    = $4; save_max("vote",   $4)
+    old[hit]     = $5; save_max("old",    $5)
+    recent[hit]  = $6; save_max("recent", $6)
+    files[hit]   = $7; save_max("files",  $7)
+    maint[hit]   = $8
+    for (i = 9; i <= NF; i++) { maint[hit] = maint[hit] " " $i }
+  }
+  END {
+    width = width - max["rank"] - max["name"] - max["inst"] - max["vote"] \
+                  - max["old"] - max["recent"] - max["files"] - 7
+    for (h = 1; h <= hit; h++) {
+      maintainer = maint[h]
+      if (h == 1) {
+        if (c0) maintainer = sprintf("%-*s", width, maint[1]) c0
+      } else {
+        maintainer = substr(maint[h], 1, width)
+        if (maintainer != maint[h]) {
+          maintainer = substr(maintainer, 1, length(maintainer)-2) ".."
+        }
+      }
+      printf("%-*s %-*s %*s %*s %*s %*s %*s %s\n",
+        max["rank"], rank[h], max["name"], name[h], max["inst"], inst[h],
+        max["vote"], vote[h], max["old"], old[h], max["recent"], recent[h],
+        max["files"], files[h], maintainer)
+    }
+  }
+' /dev/stdin "$CACHE" |grep ^
+RETVAL=$?
+if [ $RETVAL != 0 ]; then
+  echo "N: Unable to locate packages matching '$package'" >&2
+fi
+
+# older code {{{
+
+#if we_have columns
+#  then neater() { columns -s; }
+#  else neater() {
+#    awk -F '(' '$1 { gsub(" ", "_'$$'_", $2); print $1 "(" $2 }' |column -t \
+#      |sed "s/_$$_/ /g; s/  *$//"
+#  }
+#fi
+#
+#{
+#  echo \#rank # grep query to get title
+#  for package in "$@"; do
+#    if [ "$package" != "${package#lib}" ]
+#      then KILL_LIBS='$1 !~ /^lib/'
+#      else KILL_LIBS=''
+#    fi
+#    apt_search "$package" |awk "$KILL_LIBS"' {print " "$1" "}' |grep ^
+#    if [ $? != 0 ]; then
+#      echo "N: Unable to locate packages matching '$package'" >&2
+#      [ -z "$RETVAL" ] && RETVAL=1
+#    else
+#      RETVAL=0
+#    fi
+#  done
+#} |grep $absolute -f- "$CACHE" |neater
+
+# end older code }}}
+
+exit $RETVAL
