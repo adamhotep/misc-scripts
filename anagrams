@@ -1,0 +1,105 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use Getopt::Long;
+use Text::Wrap;
+
+my %opt = ( dictionary => "$ENV{HOME}/.dict/twl06", min => 2 );
+$opt{dictionary} = "/usr/share/dict/words" unless -s $opt{dictionary};
+
+sub do_help {
+  printf <<end_help
+Usage: anagrams [OPTIONS] LETTERS
+Find words composed of LETTERS, without extra repitition (like for Scrabble)
+
+  -d, --dictionary=DICT  Use this dictionary file. Currently:
+                         $opt{dictionary}
+  -m, --min=MIN          Minimum length (currently $opt{min})
+  -r, --range=MIN[-MAX]  Specify min & max (just one means MIN==MAX)
+  -x, --max=MAX          Maximum length (default = number of LETTERS)
+
+Part of misc-scripts: https://github.com/adamhotep/misc-scripts
+anagrams 0.2.20240714.0 copyright 2010+ by Adam Katz. Licensed GPLv3+
+end_help
+}
+
+sub say {
+  $_ = shift;
+  if (-t 1) {
+    $Text::Wrap::columns = ($ENV{COLUMNS} || `tput cols`);
+    chomp $Text::Wrap::columns;
+    $_ = wrap(" ", " ", $_);
+  } else {
+    $_ = " $_";
+  }
+  print "$_\n";
+}
+
+GetOptions(\%opt, qw{ debug dictionary=s help min|m=i max|x=i range=s })
+  or die "Invalid option(s)\n";
+
+if ($opt{help}) {
+  do_help();
+  exit;
+}
+
+my $jumble = shift @ARGV;
+$opt{max} ||= length($jumble);
+
+if ($opt{range}) {
+  if ($opt{range} =~ /^([0-9]+)(?:[- ]+([0-9]+))?$/) {
+    $opt{min} = $1;
+    $opt{max} = $2 || $1;
+  } else {
+    die qq/invalid range "$opt{range}" is not in "NN-NN" format (e.g. "2-8")\n/;
+  }
+}
+
+my %count = my %uniq = my %hits = ();
+my $letters = join("", sort grep !$uniq{$_}++, split(//, $jumble));  # uniq
+$letters =~ s/(\W)/\\$1/g;	# escape non-word chars
+my @exclusions = ( "[^$letters]" );	# exclude items with invalid letters
+printf "exclusion: %s\n", $exclusions[0] if $opt{debug};
+
+# list of letters at each count
+for (sort keys %uniq) {
+  $count{$uniq{$_}} .= $_;
+}
+
+# exclude items with more of any given letter than afforded by the list
+for my $c (sort keys %count) {
+  my $n = $count{$c};
+  # since we're combining these, they need uniquely named backrefernces
+  push(@exclusions, sprintf('(?<%s>[%s])(?:.*\g{%s}){%d}', $n, $n, $n, $c) );
+  printf "exclusion: %s\n", $exclusions[scalar @exclusions - 1] if $opt{debug};
+}
+my $exclude_re = join('|', @exclusions);
+print "exclude_re: $exclude_re\n\n" if $opt{debug};
+
+open(my $dict, "<", $opt{dictionary})
+  or die "Missing dictionary file '$opt{dictionary}'\n";
+
+while(<$dict>) {
+  chomp;
+  my $len = length($_);
+  next unless $opt{min} <= $len and $len <= $opt{max} and not m/$exclude_re/i;
+  push(@{$hits{$len}}, $_);
+}
+close $dict;
+
+my $newline = '';
+if ($jumble !~ /[<>]/) {
+  $jumble = qq/<$jumble>/;
+} elsif (-1 == index($jumble, q/`/)) {
+  $jumble = qq/`$jumble`/;
+} else {
+  $jumble = qq/ $jumble /;
+}
+for my $len (sort { $b <=> $a } keys %hits) {
+  printf qq/%s%d-letter words from %s (%d)\n/,
+    $newline, $len, $jumble, scalar @{$hits{$len}};
+  say(join " ", @{$hits{$len}});
+  $newline = "\n";
+}
+
