@@ -1,0 +1,136 @@
+#!/bin/sh
+usage="Usage: ${0##*/} [OPTIONS] [COUNT|DICT...]"
+help() { cat <</help
+Generate a block of random names, without listing real words.
+$usage
+  -1      Show one name per line; \`namegen -1 1\` gives exactly one random name
+  -c NUM  Output width in characters, default is \$COLUMNS, -c${COLUMNS:-80}
+  -m NUM  Minimum letters in name (down to two), default is -m4
+  -n NUM  Number of lines of these names to display, default is -n10
+  -w      Generate words only, arguments are dictionary files/dirs
+          or else $dict
+  -x NUM  Maximum letters in name, default is -x6, output width grows for this
+  COUNT   Same as -n NUM, requires a lack of -w
+  DICT    File(s) or directori(es) to sample, each line is a word (requires -w)
+
+When generating potential domain names, even 5 is a rough minimum.
+
+/help
+version $1
+}
+
+version() {
+  echo "A part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "namegen 0.6.20200827.1 copyright 2005+ by Adam Katz, GPLv3+"
+  exit $1
+}
+
+die() { [ -n "$1" ] && printf '%s\n' "$@" >&2; exit 2; }
+if ! command -v utf2ascii >/dev/null 2>&1; then
+  utf2ascii() { sed 's/[^ -~]/-/g' "$@"; }
+fi
+
+min=4
+max=6
+dict="/usr/share/dict"
+lines= single= words=
+[ -z "$COLUMNS" ] && COLUMNS="$(tput cols)" # get window width
+numcol=${COLUMNS:-80} # default to window width or else 80 if still unknown
+
+isnum() {
+  if [ "$1" -gt 0 ] 2>/dev/null; then
+    echo "$1"
+  else
+    local n="$1"
+    shift
+    die "Invalid number of ${*:-letters} '$n'"
+  fi
+}
+
+while getopts 1c:hm:n:wvVx:-: OPT; do
+  if [ "$OPT" = - ]; then # long opt https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARGS#"$OPT"}" OPTARG="${OPTARG#=}"
+  fi
+  case "$OPT" in
+    ( 1 | single )	SINGLE=true ;;
+    ( c | char* )	numcol="$(isnum "$OPTARG" chars for width)" || die ;;
+    ( h | help )	help ;;
+    ( m | min* )	min="$(isnum "$OPTARG" minimum letters)" || die ;;
+    ( n | lin* | num* )	lines="$(isnum "$OPTARG" lines)" || die ;;
+    ( [vV] | ver* )	version ;;
+    ( w | word* )	words=true ;;
+    ( x | max* )	max="$(isnum "$OPTARG" maxiumum letters)" || die ;;
+    ( \? )		die ;;
+    ( * )		die "Illegal option --$OPT" ;;
+  esac
+done
+shift $((OPTIND-1))
+
+if [ -z "$words$lines" -a -n "$1" ]; then
+  lines="$(isnum "$1" lines)" || die
+elif [ -z "$lines" ]; then
+  lines=10
+fi
+
+# sanitize min and max
+[ "$min" -lt 2 ] && min=2
+[ "$max" -lt 2 ] && max=2
+[ "$min" -gt "$max" ] && foo="$min" && min="$max" && max="$foo"
+
+type apg >/dev/null 2>&1 || apg() {
+  echo "You'd get better results with APG (Automated Password Generator)..." >&2
+  head -c"$((lines*COLUMNS*2000))" /dev/urandom |strings |tr '[A-Z]' '[a-z]' \
+    |tr -cd "[a-z'-]" \
+    |awk -v min=$min -v max=$max -v apos="'" -v lines=$lines -v cols=$COLUMNS '
+      BEGIN {
+        for (i=97; i<=122; i++) ord[sprintf("%c", i)] = i
+        ord[apos] = 123  # not ascii!
+        ord["-"]  = 124  # not ascii!
+      }
+      {
+        # TODO: this is broken
+        while (length($0) > 1 && count < lines * cols * 20) {
+          srand(srand() + ord[substr($0, 1, 1)]);	# steal a char for seed
+          i = (ord[substr($0, 2, 1)] - 97) / (max-min);	# another for rand len
+          i = sprintf("%.0f", rand() * i + min);	# set random length
+          print substr($0, 3, i);			# get substr
+          $0 = substr($0, 4+i)
+          count++
+        }
+      }'
+}
+
+col=$(($max+1))
+
+
+# if 'aspell list' will list mispelled words (and not real words), use it
+if [ "$(echo vgqvq word |aspell list 2>/dev/null)"  = vgqvq ]; then
+  spell="aspell list"
+fi
+
+# that list of consonants is by frequency of top >2% of English
+for name in $(
+  if [ "$words" = true ]; then
+    find -L "${@:-$dict}" -maxdepth 1 -not -type d -not -name 'README*' -print0 \
+      |xargs -0 awk -v min="$min" -v max="$max" "
+        !/'s$/ { L = length(\$0); if (min <= L && L <= max) print }" \
+      |shuf -n "$((lines*COLUMNS/3))" \
+      |utf2ascii \
+      |awk '!seen[tolower($0)]++'
+  else
+    apg -M l -m$min -x$max -n"$((lines*COLUMNS*20))" \
+      |grep "[srntlcdgmph]" |grep "[aeiou]" \
+      |egrep -v "cr?$|c[^ekhr]|a[eo]|e[io]|i[eu]|oe|u[aio]|[a-df-kmnpqt-z]{2}" \
+      |${spell:-cat}
+  fi
+); do
+   if [ -n "$SINGLE" ]; then
+     echo "$name"
+   else
+     while [ ${#name} -lt $col ]; do name=" $name"; done # spacing for columns
+     i="$((${i:-1} + 1))"   				# count words per line
+     printf "$name"
+     [ $i -gt $(($numcol/$col)) ] && echo "" && i=1 # line full -> wrap
+   fi
+   [ $? = 0 ] && lines="$(($lines - 1))" && [ 0 = "$lines" ] && exit 0 # done?
+done	# done when $lines has shrunk to zero (as above) or we're out of names
