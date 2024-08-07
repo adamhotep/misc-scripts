@@ -1,0 +1,162 @@
+#!/bin/bash
+blurb="Select Graphic Rendition"
+blurb="Demonstration of various $blurb parameters (ANSI SGR colors+)"
+link="https://en.wikipedia.org/wiki/ANSI_Select_Graphic_Rendition"
+
+help() {
+  echo "$blurb"
+  echo "Usage: ${0##*/} [OPTIONS]"
+  echo "  -A, -a   Disable (-A, default) / enable (-a) ALL (-BCFI / -bcfi)"
+  echo "  -B, -b   Disable (-B, default) / enable (-b) showing blinking cues"
+  echo "  -C, -c   Disable (-C, default) / enable (-c) cancellation cues"
+  echo "  -F, -f   Disable (-F, default) / enable (-f) font cues (poor support)"
+  echo "  -I, -i   Disable (-I, default) / enable (-i) ideograms (poor support)"
+  echo "  -n, -w   Narrow or wide display (default: auto-fit)"
+  echo ""
+  version
+}
+
+version() {
+  echo "A part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "sgr 1.0.20240806.0 copyright 2000+ by Adam Katz, GPLv2+"
+  exit
+}
+
+all=0	# NOTE, this prevents enabling stuff rather than suppressing stuff
+blink=0
+cancel=0
+font=0
+help=0
+ideo=0
+narrow=2	# 2=auto
+n=$'\n'
+e=$'\033'
+esc="$e[7m^[$e[m"
+
+if [ "$1" = "--help" ]; then
+  help=1
+  shift
+elif [ "$1" = "--version" ]; then
+  version=1
+  shift
+fi
+
+while getopts AaBbCcFfhIinwvVW: OPT; do
+  case "$OPT" in
+    ( A )	all=0 blink=0 cancel=0 font=0 ideo=0 ;;
+    ( a )	all=1 blink=1 cancel=1 font=1 ideo=1 ;;
+    ( B )	blink=0 ;;
+    ( b )	blink=1 ;;
+    ( C )	cancel=0 ;;
+    ( c )	cancel=1 ;;
+    ( F )	font=0 ;;
+    ( f )	font=1 ;;
+    ( h )	help=1 ;;
+    ( I )	ideo=0 ;;
+    ( i )	ideo=1 ;;
+    ( n )	narrow=1 ;;
+    ( [vV] )	version=1 ;;
+    ( w )	narrow=0 ;;
+    ( W )	COLUMNS="$OPTARG" ;;	# hidden arg to set columns for testing
+    ( * )	echo "Try -h" >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND-1))
+
+if [ "$COLUMNS" -ge 160 ]
+  then n160=""
+  else n160="$n"
+fi
+
+blurb="$blurb${n160:-. }See also ECMA-48 or $link"
+
+if [ "$help" = 1 ]; then
+  help
+elif [ "$version" = 1 ]; then
+  version
+fi
+
+#####
+# auto-detect display affordances and fit to them
+
+isNaN() { ! [ "$1" -gt 0 ] 2>/dev/null; }
+if isNaN "$COLUMNS";	then COLUMNS="$(tput cols )"; fi
+if isNaN "$LINES";	then   LINES="$(tput lines)"; fi
+
+if [ "$narrow" = 1 ]
+  then width=3
+  else width=6
+fi
+
+# Usage: fits CELL_WIDTH [EXTRA_CELL_COUNT]
+fits() {
+  w=$1
+  tot=$((2 + (3==W) + W * \
+    ( 19 + ${2:-0} + BLINK*3 + CANCEL*12 + FONT*11 + IDEO*5 + CANCEL*IDEO ) ))
+  avail=$(( COLUMNS - TOT ))
+  #echo "cols=$COLUMNS tot=$tot avail=$avail" >&2
+  [ $avail -GE 0 ]	# this is the return value
+}
+
+if fits $width 9; then
+  all=2
+elif fits $width 0; then	# standard case
+  if [ "$narrow" = 2 ]; then narrow=0; fi
+elif [ "$LINES" -gt 30 ] && fits 3 9; then
+  all=2
+  narrow=1
+elif [ "$narrow" = 2 ]; then
+  narrow=1
+fi
+
+# end detection of display affordances
+#####
+
+
+key="<Ctrl+v, Esc>"
+use_as="\`\\e[$e[7mcode$e[mm\`"
+
+printf "%s$n%s$n160%s$n" \
+  "$blurb" \
+  "Use as $use_as where \\e is $esc (escape char, $key) or \\033 or \\x1b " \
+  "and $e[7mcode$e[m is any semicolon-delimited code(s) below, e.g. \`\\e[3;45mHI\\e[0m\` is $e[3;45mHI$e[m." \
+
+if [ $narrow = 1 ]; then
+  printf "$n%s$n160%s$n$n" \
+    'Column one is stand-alone, e.g. `\e[1m` while others combine with it, ' \
+    'so row 1 col 2 is `\e[1;1m` and row 31 col 4 is `\e[31;3m`'
+fi
+
+for c1 in {0..65}; do	# ROWS
+  case $c1 in
+    ( 38 | 48 | 5[6-9] )	continue ;;	# expanded or reserved code
+    ( 4[0-7] | 49 )		if [  $LINES -lt 30 ]; then continue; fi ;;
+    ( 5 | 6 | 25 )		if [ "$blink"  =  0 ]; then continue; fi ;;
+    ( 8 | 2[2-9] | 5[045] ) 	if [ "$cancel" =  0 ]; then continue; fi ;;
+    ( 1[0-9] | 20 )		if [ "$font"   =  0 ]; then continue; fi ;;
+    ( 6[0-4] )			if [ "$ideo"   =  0 ]; then continue; fi ;;
+    ( 65 )		if [ "$ideo$cancel"   != 11 ]; then continue; fi ;;
+  esac
+  if [ "$narrow" = 1 ]
+    then out=";"
+    else out=""
+  fi
+  printf %s%2s%s "$e[${c1}m" "$c1" "$out$e[m"
+  for c2 in {1..65}; do	# COLUMNS
+    case $c2 in
+      ( 38 | 48 | 5[6-9] )	continue ;;	# expanded or reserved code
+      ( 3[0-7] | 39 )		if [ "$all"  -lt  2 ]; then continue; fi ;;
+      ( 5 | 6 | 25 )		if [ "$blink"  =  0 ]; then continue; fi ;;
+      ( 8 | 2[2-9] | 5[045] )	if [ "$cancel" =  0 ]; then continue; fi ;;
+      ( 1[0-9] | 20 )		if [ "$font"   =  0 ]; then continue; fi ;;
+      ( 6[0-4] )		if [ "$ideo"   =  0 ]; then continue; fi ;;
+      ( 65 )		if [ "$ideo$cancel"   != 11 ]; then continue; fi ;;
+    esac
+    if [ "$narrow" != 1 ]
+      then out="$(printf %5s "$c1;$c2")"
+      else out="$(printf %2s "$c2")"
+    fi
+    printf %s " $e[$c1;${c2}m$out$e[m"
+  done
+  echo ""
+done
