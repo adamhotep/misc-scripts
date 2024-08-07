@@ -1,0 +1,422 @@
+#!/bin/sh
+help() { cat <<'/help'
+Convert look-alike characters into ASCII, outputs to standard output without -i
+Usage: utf2ascii [OPTIONS] [FILE]
+  -h, --help                       View this help
+  -i[SUFFIX], --in-place[=SUFFIX]  Edit files in place (save backups w/ SUFFIX)
+  --perl                           Use perl instead of sed (may work better)
+  -V, --version                    View this script's version info
+
+If you're looking for phonetic transliterations, try one of:
+    iconv -f utf-8 -t ascii//translit
+    uconv -x "::NFD; [:Nonspacing Mark:] > ; ::NFC;"
+    uconv -x "::Latin; ::Latin-ASCII;"
+    perl -MText::Unidecode -pe 'use open qw(:std :utf8); $_ = unidecode($_)'
+
+Part of misc-scripts: https://github.com/adamhotep/misc-scripts
+utf2ascii 1.0.20240806.0 copyright © 2005+ by Adam Katz <@adamhotep>, GPLv3+
+/help
+}
+
+# parse arguments looking for -h/--help, --in-place, --perl, and -V/--version
+# as needed to provide extras. Perl doesn't know --in-place, so it becomes -i.
+mark=reset
+for arg in "$@"; do
+  if [ "$mark" = reset ]; then mark=''; set --; fi
+    case "$mark$arg" in
+      ( -- )			mark=--mark-$$; set -- "$@" -- ;;
+      ( -h | --help )		help; exit ;;
+      ( --in-place )		set -- "$@" -i ;;
+      ( --in-place=?* )		set -- "$@" -i"${arg#--in-place=}" ;;
+      ( --perl )		sed() { perl -p -CAS -Mutf8 "$@"; } ;;
+      ( -V | --version )	help |tail -n2; exit ;;
+      ( * )			set -- "$@" "$arg" ;;
+  esac
+done
+
+# Unlike most code, this file is best edited in a NON-fixed-width font
+# as that would make the ligatures and other wider characters easier to read.
+# E.g. vim always forces fixed width, making many symbols indistinguishable.
+#
+# see also https://www.unicode.org/Public/security/8.0.0/confusables.txt
+# and      https://stackoverflow.com/q/48825983/519360
+#
+# Sampling includes (but is not limited to)
+# * ISO 8859-1 (Latin-1 Supplement, unicode U+0080 to U+00FF)
+# * Latin Extended-A & -B, IPA Extensions (unicode U+0100 - U+02AF)
+# * Greek and Coptic, Cyrillic, Armenian (unicode U+0370 - U+058F)
+# * Georgian (U+10A0 to U+10FF)
+# * Cherokee, CA Aboriginal (U+13A0 - U+167F)
+# * Extensions: Cyrillic-C, Phonetic, Latin, Greek, Punct (U+1C80 - U+206F)
+# * Currency Symbols (U+20A0 to U+20CF)
+# * Letterlike Symbols (U+2100 to U+214F)
+# * Arrows, Math Operators, Misc Technical, Control Pics (U+2190 to U+244A)
+# * Glagolitic, Latin Ext-C, Coptic, Georgian Sup, Tifinagh (U+2C00 - U+2D7F)
+# * CJK Compatibility units & ideographs (U+3300 - U+33FF)
+# * Lisu,Vai,Cyrillic Ext-B,Bamum,Modifier Tone,Latin Ext-D (U+A4D0 - U+A7FF)
+# * Alphabetic Presentation Forms (typset ligatures, U+FB00 - U+FB4F)
+# * Halfwidth/Fullwidth forms (U+FF00 - U+FFEF)
+# * Enclosed Alphanumerics & Dingbats (single character extraction only)
+#
+# While there are a few ligatures and non-letter mappings here, they are not as
+# exhaustive as the letter mappings.
+
+sed "$@" -e '
+
+# DIGITS
+s/[ØƟǾΘθϑϴѲѺ҈҉ӨӪᴓⲐⴱⵁⵙⵚᎾᏫꝊ㍘０⓪⓿]/0/g;
+s/[ꛨ㍙㏠１①⑴⒈⓵❶➀➊]/1/g;
+s/[ƻƧϨϩշՁՉՋջⳈⳉᒿꝛꝜꝝ㍚㏡２②⑵⒉⓶❷➁➋]/2/g;
+s/[ʒƷƺǮǯȜȝЗзҘҙѮѯӞӟӠӡэՑᴈᴣᶔᶚ℥ⲜⲝⳄⳅⳌⳍვꜢꜣꝪꝫꞫ㍛㏢３③⑶⒊⓷❸➂➌]/3/g;
+s/[ᏎꜬꜭꜮꜯ㍜㏣４④⑷⒋⓸❹➃➍]/4/g;
+s/[ƼƽҔҕ㍝㏤５⑤⑸⒌⓹❺➄➎]/5/g;
+s/[ỼⳒⳓ㍞㏥６⑥⑹⒍⓺❻➅➏]/6/g;
+s/[ᲄ⁊ꚨ㍟㏦７⑦⑺⒎⓻❼➆➐]/7/g;
+s/[Ȣȣᴕ㍠㏧８⑧⑻⒏⓼❽➇➑]/8/g;
+s/[ԳⳊⳋꝮꝯꝰ㍡㏨９⑨⑼⒐⓽❾➈➒]/9/g;
+
+# LETTERS
+s/[ÀÁÂÃÄÅĀĂĄǍǞǠǺȀȂȦƛȺɅΆΑΔΛλϪϫАДдѦѧӐӒԮՃᲁᴀᴧḀẠẢẤẦẨẪẬẮẰẲẴẶἈἉἊἋἌἍἎἏᾈᾉᾊᾋᾌᾍᾎᾏᾸᾹᾺΆᾼ₳ⲀⴷⵠᎪᗅᗋᗗᗩ∧ꓥꓮꙘꙢꚀꛎＡ∆∧⋀ÅⒶ]/A/g;
+s/[ªàáâãäåāăąǎǟǡǻȁȃȧɑʌʎάαаӑӓᶏᶐḁẚạảấầẩẫậắằẳẵặἀἁἂἃἄἅἆἇᾀᾁᾂᾃᾄᾅᾆᾇᾰᾱᾲᾳᾴᾶᾷὰάⱥⲁａ⍶⍺⒜ⓐ]/a/g;
+s/[ßƁΒɃβϐБбВвՅᲀᴃḂḄḆẞ₿ⲂᏰᏴᗷᗹᙖᙗᙘꓐꜨꞖꞚꞛꞴꞵＢℬⒷ]/B/g;
+s/[þƀƂƃƄƅɓɞʙϸϦϬϭЪЬъьҌҍѢѣᲆᲇᵬᵷᶀḃḅḇⰓⲃⴆⴑႦႱნსწხᏏᏸᏼᑾᑿᒀᒁᒂᖯꙎꙏｂ␢⒝ⓑ]/b/g;
+s/[ÇĆĈĊČƇϹϚϾСҀҪḈ₡€₵ⲤⳞⵎⵛᏟᑕᑖᑡᑢᑣᑤᑥᑪᙅꓚꞒＣ∁⊂⊆⊊⊏⊑⋐⋢⋤ⅭↃↅℂ℃ℭⒸ]/C/g;
+s/[¢çćĉċčƈɕͼςϛҫϲсєҁԍᲃᴄḉⲥⳟⴀᘳꞓｃ￠ⅽↄ⒞ⓒ]/c/g;
+s/[ÐĎĐƉƊᴅᴆḊḌḎḐḒⲆᎠᑓᗞᗟᗠᗪᗫᗬᙃꓓꓷＤⅮↁⅅⒹ]/D/g;
+s/[ðďđƋƌɖɗδȡԀԁԂԃԺժծձᵭᶁᶑḋḍḏḑḓẟ₫ⴋⴛმშძᑯᑰᑱᑺᑻᑼᑽꓒꝱꝺｄⅾⅆ⒟ⓓ]/d/g;
+s/[ÈÉÊËĒĔĖĘĚƎƐȄȆȨƩƸƹɆΈΕΞΣέεԑξϵЀЁЄЕӖԐᴇᶓḔḖḘḚḜẸẺẼẾỀỂỄỆἐἑἒἓἔἕἘἙἚἛἜἝῈΈὲέ⁅ℰⲈⲉⲶⴹⴺⵉⵟᎬᏋꓰꓱꗋꜪꜫＥﾼ∃∄∈∉∊∋∌∍∑≋≡≢⋲⋳⋴⋵⋶⋷⋸⋹⋿ℇ⅀↋Ⓔ]/E/g;
+s/[èéêëēĕėęěƏǝȅȇȩɵȼȻɇɐɘəɚɛɜɝеѐёҼҽҾҿӗӘәӚӛᶒᶕḕḗḙḛḝẹẻẽếềểễệｅ℈℮ℯⅇ⒠ⓔ]/e/g;
+s/[ƑϜҒӺḞᖴꓝꓞꗓꛂꜰꝻꞘꟻＦ℉ℱℲⅎⒻ]/F/g;
+s/[ſƒϝԲբᵮᶂḟẛẜẝ₣Ꝭꝭꞙｆ∫∮∱∲∳⒡ⓕ]/f/g;
+s/[ĜĞĠĢƓǤǦǴԌḠ₲ႺᎶᏀᏩᏳꓖꞠＧⒼ]/G/g;
+s/[ĝğġģƍƣǥǧǵɠɡɢʛցᶃḡⴂჟჭꞔꞡｇℊℽ⒢ⓖ]/g/g;
+s/[ĤĦǶȞΉΗЊНнњҢҤӇӈӉӊԊԋԢԨԩңҥḢḤḦḨḪἨἩἪἫἬἭἮἯᾘᾙᾚᾛᾜᾝᾞᾟῊΉῌⱧⲎⲏⳭⴼᎻᕼꔠꜦꞪＨ∦∺ℋℌℍⒽ]/H/g;
+s/[ĥħƕȟɦɧʜʩЋЂђћҺһԦԧիհḣḥḧḩḫẖⱨⴌⴙⴡႬჩႹᏂꚔꚕꛖꜧꞕｈℎℏ⒣ⓗ]/h/g;
+s/[ÌÍÎÏĨĪĬĮİƖƗǏȈȊΊΐΙΪІЇӀӏḬḮỈỊἸἹἺἻἼἽἾἿῘῙῚΊⳔⵊⵏᏆꓲ꘡꜈꜉꜊꜋꜌꜍꜎꜏꜐ꞮＩｴￜ∣∥⌶⌈⌉⎛⎜⎞⎟⎡⎤⎥⎧⎪⎫⎮Ⅰ꠰꡶ℐℑⒾ]/I/g;
+s/[¡ìíîïĩīĭįıǐȉȋɨɩɪΐίιϊіїլᶖḭḯỉịἰἱἲἳἴἵἶἷὶίῐῑῒΐῖῗⲓⳕᎥꙇꜟｉｪ⍳⍸ⅰ℩ℹⅈ⒤ⓘ]/i/g;
+s/[ĴɈͿЈᴊᎫᒍᒎᒏᒘᒙᒚᒛꓙꞲＪ⌡⎠Ⓙ]/J/g;
+s/[ĵǰȷɉɟɹɺʝϳјյⰬⱜｊⅉ⒥ⓙ]/j/g;
+s/[ĶƘǨΚκϏϰЌЖКжӃӄкќѪҚқҜҝҞҟҠҡӁӂӜӝԞԟᴋḰḲḴ₭ⱩⲔⴽᏦꓗꓘꝀꝂꝄꞢꞰＫKⓀ]/K/g;
+s/[ķĸƙǩᶄḱḳḵⱪⲕⳤꝁꝃꝅꞣｋ⒦ⓚ]/k/g;
+s/[ĹĻĽĿŁԼւᴌḶḸḺḼⱠⱢⳐⳑⳖⳗᏞᒪᒫᒶᒷᒸᒹᒺꓡꚥꛚ꜑꜖ꝆꝈꞭＬ∟∠⊥Ⅼℒ⅂⅃Ⓛ]/L/g;
+s/[ĺļľŀłƪƚȴɭɺʃʄʅʆʟᶅᶋᶘḷḹḻḽⱡⲒꙆꝲꞁꟾꝇꞋｌⅼℓ⒧ⓛ]/l/g;
+s/[ΜϺМӍḾṀṂⰮⱮⲘᎷᗰᙏᙢꓟꙦＭﾶⅯℳⓂ]/M/g;
+s/[ɱʍϻӎмᲅᴍᵯᶆḿṁṃ₥ⱞⲙⴅⴇⴊⴜთორღჶᘻꙧꝳｍ㎡㎥ⅿ⒨ⓜ]/m/g;
+s/[ÑŃŅŇŊƝǸȠͶͷийΝИЙΠЍЛПҊӢӤԈԒԤՈᴎṄṆṈṊ₦ⲚⲠⵍꓠꚡꞐＮℕⓃ]/N/g;
+s/[ñńņňŉƞǹȵηπϗлпѝҋӣӥԉԓԥԯՈՊՌդήըղոռրᴒᴨᵰᶇṅṇṉṋἠἡἢἣἤἥἦἧᾐᾑᾒᾓᾔᾕᾖᾗῂῃῄῆῇὴήᴫⲛⲡⴄⴈⴖიꙥꝴꞃꞑꞥｎ∏∩⊓⋂⋒⒩ⓝ]/n/g;
+s/[ÒÓÔÕÖƆŌŎŐƠǑȌȎȪȬȮȰΌΟΦΩΏϽϿОФЮӦԾՓՕṌṎṐṒỌỎỐỒỔỖỘỚỜỞỠỢὈὉὊὋὌὍῸΌὨὩὪὫὬὭὮὯᾨᾩᾪᾫᾬᾭᾮᾯῺΏῼⱭⱰⲞⳲⵔႣᎤꓛꓳꙨꙪꚚꜾꝌꝹＯΩ℧Ⓞ]/O/g;
+s/[òóôõöø°ºōŏőơǒǿȍȏȫȭȯȱɔʘͻͽοσόϙϬϭоѳѻӧөӫօᲂᲈ᳃ᴏᴐᴑᶗṍṏṑṓọỏốồổỗộớờởỡợὀὁὂὃὄὅὸόⱺⲑⲟⳳⴰᘯᘵꙩꙫꚛꜿꝋꝍｏ∅∘∝≎⊕⊖⊗⊘⊙⊚⊛⊜⊝⊡⋄⌀⌑⌮⌼⌽⌾⍜⍟⍤⍥⍬⎉⎊⎋⎏⎐⎑⎒⎔⏣ℴ⒪ⓞ]/o/g;
+s/[¶ÞƤǷΡϷРҎԖՔᴘᴩṔṖῬ⁋Ᵽ₱₽ⲢⳀⳁⳎⳢ⳨ႲႼᎮᎵᏈᏢᑬᑭᑮᑶᑷᑸᑹᕈᕉᖘꓑꚰꛞꛫꝐꝒꝔꝤꝦꝨꟼＰ℘ℙ⅌Ⓟ]/P/g;
+s/[ƥƿɸρφϱϼрҏԗթքᵱᵽᶈṕṗῤῥⲣⳣⴒꝑꝓꝕꝥꝩꝧｐ⍴⒫ⓟ]/p/g;
+s/[ɊϘǪǬƢϕфԚⲪⵕႭႳꝖꝘꝾꞬＱℚ℺]Ⓠ/Q/g;
+s/[ɋԛǫǭգզⲫꝗꝙꝿｑ⒬ⓠ]/q/g;
+s/[ŔŖŘƦȐȒɌЯяԆᴙᴚṘṚṜṞⱤᎡᏒᖆᖇꓣꓤꝚꞦＲℛℜℝ℟Ⓡ]/R/g;
+s/[ŕŗřȑȓɼɽɾɍʀʁгґғӆӷѓԻՐՒᴦᵲᵳᶉṙṛṝṟⳏꜥꝼꞅꜤꝵꞧꝶꞄｒ⒭ⓡ]/r/g;
+s/[§ŚŜŞŠȘЅՏṠṢṤṦṨ₷ⱾႽᎦᏕᏚꓢꚂꚃꝸꞨＳⓈ]/S/g;
+s/[śŝşšƨșȿʂϧѕᵴᶊṡṣṥṧṩꜱꞩｓ⒮ⓢ]/s/g;
+s/[ŢŤŦƬƮȚȾͲͳΓΤЃГТҬӶԎᴛṪṬṮṰ₮₸ⲦⴶᎢꓔꔋꚌꚐꞀꞆＴ∓⊤⊺⍑⍡⏉Ⓣ]/T/g;
+s/[ţťŧƫƭǂțȶȽɫɬɻʇʈͰͱτϮϯтҭԏԵԷեէᵵᵻᵼṫṭṯṱẗ†‡ⱦⲧⵐⵜᎿᏐꚍꚑꝉꝷꞎꞇｔｫｬｲｵｾﾄﾅ∔∤∻⊦⒯ⓣ]/t/g;
+s/[ÙÚÛÜŨŪŬŮŰƯƱǓǕǗǙǛȔȖɄЦԱԿՄՍՎկմևṲṴṶṸṺỤỦỨỪỬỮỰⳘⵡႮᏌᑌᑗᑘᑧꓴꙠꚳꞞＵ∐⋃⋓Ⓤ]/U/g;
+s/[ùúûüũūŭůűưǔǖǘǚǜȕȗʉʊʮʯμυϋΰύцчսնվᴜᵾᶙṳṵṷṹṻụủứừửữựⳙⴎⴑᘮᘴꙡꞟｕ⒰ⓤ]/u/g;
+s/[ƲѴѶṼṾⱯⴸᏉᏙᏤᐯᐺᐻꓦꓯＶ∀∇⊻⋁ⅤℤℨⓋ]/V/g;
+s/[∨ɣɤνѵѷᴠᵿṽṿὐὑὒὓὔὕὖὗὺύῠῡῢΰῦῧⰜⱱⱴｖ⋎√∨ⅴ⒱ⓥ]/v/g;
+s/[ŴƜΨϢϣШЩԜẀẂẄẆẈ₩ⱲⲰⳂᎳᏔᗯᙎᙔᙡꙌꚆꚖꝞꝠꞶꟽꟿＷ￦Ⓦ]/W/g;
+s/[ŵɯɰɷψωώϖϣшщѼѽѾѿԝպѡѱաᴡᴪẁẃẅẇẉẘὠὡὢὣὤὥὦὧὼώᾠᾡᾢᾣᾤᾥᾦᾧῲῳῴῶῷⱳⲱⳃⴍⴓᘺꙍꚇꚗꝟꝡꞷꟺｗ⍦⍵⍹⒲ⓦ]/w/g;
+s/[ΧХҲӼӾẊẌ╳Ⲭⴳⴴⴵⵅⵋⵝ᙭ꞳＸⅩⓍ]/X/g;
+s/[×χϗхѫҳӝӽӿᶍẋẍⲭⴟｘⅹ⒳ⓧ]/x/g;
+s/[¥ÝŲŶŸƔƳȲɎʏΎΥΫϒϓϔϞϤЎЏУЧҮҶҸӋӮӰӲӴѰҰẎỲỴỶỸỾὙὛὝὟῨῩῪΎⲨⲮⵖႡႯႷႸჄᎩᎽꚎꚒꚵꞍＹｿ￥⑂ℽ⅄Ⓨ]/Y/g;
+s/[ýÿųŷƴȳɥɏγϟϥуўџүұҵҷҹӌӯӱӳӵᶌẏẙỳỵỷỹỿⲩⲯⴁⴗⴘⴞⴤꚏꚓｙｯｼﾂ⒴ⓨ]/y/g;
+s/[ŹŻŽȤΖζƵẐẒẔⱫⱿⲌᏃꓜꙀꙂꚧꛉＺℤℨⓏ]/Z/g;
+s/[źżžȥɀʐƶᴢʑʒʓʫᴢᵶᶎẑẓẕⱬⲍⴭჍꙁꙃｚ⒵ⓩ]/z/g;
+
+# LETTER-DRIVEN MULTI-CHARACTER MAPS
+s/Ꜳ/AA/g;
+s/ꜳ/aa/g;
+s:℀:a/c:g;
+s/[ÆǢǼӔᴁ]/AE/g;
+s/[æǣǽӕᴂ]/ae/g;
+s/㏂/am/g;
+s:㏟:A/m:g;
+s/Ꜵ/AO/g;
+s/ꜵ/ao/g;
+s:[℁⅍]:a/s:g;
+s/[Ꜷ㍳]/AU/g;
+s/ꜷ/au/g;
+s/[ꜸꜺ]/AV/g;
+s/[ꜹꜻ]/av/g;
+s/Ꜽ/AY/g;
+s/ꜽ/ay/g;
+s/㍴/bar/g;
+s/[ЫыӸӹꙐꙑ]/bl/g;
+s/㏃/Bq/g;
+s/㎈/cal/g;
+s/㏄/cc/g;
+s/㏅/cd/g;
+s/₠/CE/g;
+s:㏆:C/kg:g;
+s/℄/CL/g;
+s/[㎝㎠㎤]/cm/g;
+s/㏇/Co./g;
+s:℅:c/o:g;
+s:℆:c/u:g;
+s/㏈/dB/g;
+s/ȸ/db/g;
+s/㍲/da/g;
+s/㎗/dl/g;
+s/㍷/dm/g;
+s/[ǄǄǱ]/DZ/g;
+s/[ǅǲ]/Dz/g;
+s/[ǆǳ]/dz/g;
+s/ﬁ/fi/g;
+s/ﬀ/ff/g;
+s/ﬃ/ffi/g;
+s/ﬂ/fl/g;
+s/ﬄ/ffl/g;
+s/㎙/fm/g;
+s/ﬅ/ft/g;
+s/㏿/gal/g;
+s/㎇/GB/g;
+s/㎓/GHz/g;
+s/㎬/GPA/g;
+s/㏉/Gy/g;
+s/㏊/ha/g;
+s/㏋/HP/g;
+s/㍱/hPa/g;
+s/㎐/Hz/g;
+s/[ꙖꙜ]/IA/g;
+s/[ꙗꙝ]/ia/g;
+s/[Ⅱǁ꠱꡷]/II/g;
+s/ⅱ/ii/g;
+s/[ⅢⲼⲽ꠲]/III/g;
+s/ⅲ/iii/g;
+s/Ĳ/IJ/g;
+s/ĳ/ij/g;
+s/㏌/in/g;
+s/㍺/IU/g;
+s/Ⅳ/IV/g;
+s/ⅳ/iv/g;
+s/Ⅸ/IX/g;
+s/ⅸ/ix/g;
+s/㎄/kA/g;
+s/㎅/KB/g;
+s/㎉/kcal/g;
+s/㎏/kg/g;
+s/㎑/kHz/g;
+s/㏍/KK/g;
+s/㎘/kl/g;
+s/㏎/KM/g;
+s/[㎞㎢㎦]/km/g;
+s/㏀/kO/g;
+s/㎪/kPa/g;
+s/㏏/kt/g;
+s/㎸/kV/g;
+s/㎾/kW/g;
+s/℔/lb/g;
+s/Ǉ/LJ/g;
+s/ǈ/Lj/g;
+s/ǉ/lj/g;
+s/Ỻ/LL/g;
+s/㏐/lm/g;
+s/㏑/ln/g;
+s/㏒/log/g;
+s/ʪ/ls/g;
+s/㏓/lx/g;
+s/ʫ/lz/g;
+s/㎃/mA/g;
+s/㎆/MB/g;
+s/㏔/mb/g;
+s/㎎/mg/g;
+s/㎒/mHz/g;
+s/㏕/mil/g;
+s/㎖/Ml/g;
+s/[㎜㎟㎣]/mm/g;
+s/㏁/MO/g;
+s/㏖/mol/g;
+s/㎫/MPa/g;
+s/㎳/ms/g;
+s:[㎧㎨]:m/s:g;
+s/㎹/MV/g;
+s/㎷/mV/g;
+s/㎿/MW/g;
+s/㎽/mW/g;
+s/㎁/nA/g;
+s/㎋/nF/g;
+s/Ǌ/NJ/g;
+s/ǋ/Nj/g;
+s/ǌ/nj/g;
+s/ŋ/ng/g;
+s/㎚/nm/g;
+s/№/No/g;
+s/㎱/ns/g;
+s/㎵/nV/g;
+s/㎻/nW/g;
+s/⳪/oc/g;
+s/Œ/OE/g;
+s/œ/oe/g;
+s/[ꙬꚘꝎ]/OO/g;
+s/[ꙭꚙꝏ]/oo/g;
+s/㍵/oV/g;
+s/Ѹ/Oy/g;
+s/ѹ/oy/g;
+s/㎩/Pa/g;
+s/㎀/pA/g;
+s/㍶/pc/g;
+s/㎊/pF/g;
+s/㏗/pH/g;
+s/㏘/pm/g;
+s/㏙/PPM/g;
+s/㏚/PR/g;
+s/㎰/ps/g;
+s/₧/Pts/g;
+s/㎴/pV/g;
+s/㎺/pW/g;
+s/ȹ/qp/g;
+s/㎭/rad/g;
+s:[㎮㎯]:rad/s:g;
+s/Ԙ/RE/g;
+s/ⴠ/ru/g;
+s/[Ԕ℞]/Rx/g;
+s/ԕ/rx/g;
+s/㏛/sr/g;
+s/㏜/Sv/g;
+s/ﬆ/st/g;
+s/℡/Tel/g;
+s/ᵺ/th/g;
+s/㎔/THz/g;
+s/ʦ/ts/g;
+s/[ỻ₶]/tt/g;
+s/ꜩ/tz/g;
+s/㎂/uA/g;
+s/ᵫ/ue/g;
+s/㎌/uF/g;
+s/㎍/ug/g;
+s/㎕/ul/g;
+s/㎛/um/g;
+s/տ/un/g;
+s/㎲/us/g;
+s/㎶/uV/g;
+s/㎼/uW/g;
+s:㏞:V/m:g;
+s/Ⅵ/VI/g;
+s/ⅵ/vi/g;
+s/Ⅶ/VII/g;
+s/ⅶ/vii/g;
+s/Ⅷ/VIII/g;
+s/ⅷ/viii/g;
+s/㏝/Wb/g;
+s/Ⅺ/XI/g;
+s/ⅺ/xi/g;
+s/Ⅻ/XII/g;
+s/ⅻ/xii/g;
+
+# Symbols typically parenthesized in ASCII
+s/©/(C)/g;
+s/℗/(P)/g;
+s/®/(R)/g;
+s/℠/(SM)/g;
+s/™/(TM)/g;
+
+# SPECIAL CHARACTERS (sorted by US keyboard position, includes multi-char)
+s/[‵`‛︑｀]/\`/g;
+s/[¬˜∼˜⁓῀]/~/g;
+s/[ⵑᴉǃ︕！]/!/g;
+s/‼/!!/g;
+s/⁉/!?/g;
+s/[Թꞗ＠]/@/g;
+s/[♯ⵌ＃]/\#/g;
+s/[£¤ᙚ＄]/\$/g;
+s/[‰‱⁒％]/%/g;
+s/[ˆ＾]/^/g;
+s/[⅋＆]/\&/g;
+s/[・·･᛫·⸱𐄁•‧∙⋅ᐧꞏ∗×※⁂⁎⁑⁕⁜＊]/*/g;
+s/[（｟]/(/g;
+s/[）｟]/)/g;
+s/[¯‐−‒–‑‥⁃⁌⁍─━┄┅┈┉⁻₋Ⲻⲻ⋯ⵈꟷ－ｰ￢￣￭￮]/-/g;
+s/[—―]/--/g;
+s/[꓿꞊＝]/=/g;
+s/[├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋＋]/+/g;
+s/＿/_/g;
+s:±:+/-:g;
+s/[［｢]/[/g;
+s/[］｣]/]/g;
+s/｛/{/g;
+s/｝/}/g;
+s/＼/\\/g;
+s/[¦ǀ│┃┆┇┊┋╎╏╽╿‖⁝⁞｜￤￨]/|/g;
+s/[⁏ꓼ︔；]/;/g;
+s/[⁚ꓽ꞉︓︙︰：∶]/:/g;
+s/[´′‘’‚᾽᾿῏´῾ꞌ︐𐩐＇]/\047/g;
+s/[¨„“”″‴‶‷᳓῍῎῝῞‟⁗＂]/"/g;
+s/[¸‚ꓹ，､]/,/g;
+s/[‹＜]/</g;
+s/«/<</g;
+s/[․꘎٠۰⸼ꓸ．｡]/./g;
+s/[‥ꓺ]/../g;
+s/…/.../g;
+s/[›＞]/>/g;
+s/»/>>/g;
+s:[÷Ⳇⳇ⁄／]:/:g;
+s/[¿␦⸮؟ʔɁॽᎮɂƾ︖？]/?/g;
+s/⁇/??/g;
+s/[⁈‽]/?!/g;
+s/[   ]/ /g;
+s/ /  /g;
+# soft hyphen (&shy;) is non-printing and might not be visible here
+s/­//g;
+
+# effective smileys - deprecated in favor of interpreting as lowercase y
+#s/[ｯｼﾂ]/:)/g;
+
+
+# ARROWS
+s/[←↚↜↞↤↩↫↼↽⇜⇠⇤⇷⇽￩]/<-/g;
+s/[→↛↝↠↣↦↪↬⇀⇁⇝⇢⇥⇴⇸⇻⇾￫]/->/g;
+s/[↔↭⇹⇼⇿]/<->/g;
+s/[⇇⇍⇐⇚⇦]/<=/g;
+s/[⇉⇏⇒⇛⇨⇰⇶]/=>/g;
+s/[⇄⇆⇐⇎⇔]/<=>/g;
+
+# MATH
+s/⁰/^0/g;
+s/¹/^1/g;
+s/²/^2/g;
+s/³/^3/g;
+s/⁴/^4/g;
+s/⁵/^5/g;
+s/⁶/^6/g;
+s/⁷/^7/g;
+s/⁸/^8/g;
+s/⁹/^9/g;
+
+s/≠/!=/g;
+s/≤/<=/g;
+s/≥/>=/g;
+
+# FRACTIONS
+# If beginning the line or not preceded by a number, spell it out, otherwise
+# put a space between that preceding number and the spelled out fraction.
+# If GNU sed is missing, this should harmlessly do nothing (thus the
+# frivolous parenthesis on the second expression). *Not* PCRE.
+# Sorted by denominator
+s:\([0-9]\)⅟:\1 1/:g;   s:\(⅟\):1/:g;
+s:\([0-9]\)½:\1 1/2:g;  s:\(½\):1/2:g;
+s:\([0-9]\)↉:\1 0/3:g;  s:\(↉\):0/3:g;
+s:\([0-9]\)⅓:\1 1/3:g;  s:\(⅓\):1/3:g;
+s:\([0-9]\)⅔:\1 2/3:g;  s:\(⅔\):2/3:g;
+s:\([0-9]\)¼:\1 1/4:g;  s:\(¼\):1/4:g;
+s:\([0-9]\)¾:\1 3/4:g;  s:\(¾\):3/4:g;
+s:\([0-9]\)⅕:\1 1/5:g;  s:\(⅕\):1/5:g;
+s:\([0-9]\)⅖:\1 2/5:g;  s:\(⅖\):2/5:g;
+s:\([0-9]\)⅗:\1 3/5:g;  s:\(⅗\):3/5:g;
+s:\([0-9]\)⅘:\1 4/5:g;  s:\(⅘\):4/5:g;
+s:\([0-9]\)⅙:\1 1/6:g;  s:\(⅙\):1/6:g;
+s:\([0-9]\)⅚:\1 5/6:g;  s:\(⅚\):5/6:g;
+s:\([0-9]\)⅐:\1 1/7:g;  s:\(⅐\):1/7:g;
+s:\([0-9]\)⅛:\1 1/8:g;  s:\(⅛\):1/8:g;
+s:\([0-9]\)⅜:\1 3/8:g;  s:\(⅜\):3/8:g;
+s:\([0-9]\)⅝:\1 5/8:g;  s:\(⅝\):5/8:g;
+s:\([0-9]\)⅞:\1 7/8:g;  s:\(⅞\):7/8:g;
+s:\([0-9]\)⅑:\1 1/9:g;  s:\(⅑\):1/9:g;
+s:\([0-9]\)⅒:\1 1/10:g; s:\(⅒\):1/10:g;
+
+' "$@"
