@@ -1,0 +1,280 @@
+#!/bin/bash
+# (This script requires bash for its arrays, used to preserve spaced arguments.)
+#
+# Install in /usr/local/bin/vimdiff with a symlink named /usr/local/bin/gvimdiff
+# (or anywhere in your path before the [g]vimdiff symlinks or in place of them).
+
+help() { cat <</help
+Drop-in replacement for $VIMDIFF (side-by-side file comp.) with CVS/SVN support
+Usage:  $VIMDIFF [arguments] [file] [file2]
+  --rev <revision>   Use vcs revision <revision> to check against (default=HEAD)
+  -r                 List swap files and exit (if no next argument)
+  -r <file>          Recover crashed session for <file>
+  -r <revision>      Works as --rev (assuming <revision> isn't a valid filename)
+  --date <datespec>  Works as --rev by date rather than revision
+  -D                 Debug mode (if the next argument isn't a valid datespec)
+  -D <datespec>      Works as --date (if you have GNU date to verify datespec)
+  --debug, --recover, --swap   Workarounds for the original  -D, -r, -r <file>
+  --snapshot         Compare to latest differing \$PWD/.snapshot/*/<file> backup
+  --nothing          This argument does nothing (for un-overriding arguments)
+  --vim-help         Get the full list of vim arguments (just like vim -h)
+  --gnome-help       Get the full list of gnome arguments (just like vim --help)
+
+If no file is given, $VIMDIFF compares the first out-of-sync CVS item.
+If only one file is given, $VIMDIFF tries to compare to CVS or your .snapshot.
+Compares to latest different version if given --rev AND --snapshot (or neither).
+Runs in graphical mode with -g or if called as gvimdiff (assuming symlink).
+
+vimdiff+vcs 1.8.20100918.0, Copyright (C) 2009+ by Adam Katz <@adamhotep>, GPLv3
+/help
+}
+
+# NOTE - Subversion is still a work in progress (and is a low priority).
+
+
+DEFAULT_GEOM=165x30	# A sane default geometry for gvimdiff / vimdiff -g
+VIMDIFF="${0##*/}"	# The filename of this program (as called)
+rev=HEAD		# By default, VCS comparisons look at the HEAD revision
+ver_flag="-r"		# By default, VCS comparisons go by revision (not date)
+
+# if this script is named with a leading "g"  then add the gui flag to the args
+if [ "$VIMDIFF" = "g${0#*/g}" ]; then args="-g"; GUI=true; fi
+
+# Usage: set_rev VERSION [VERSION_FLAG]
+set_rev() {
+  if [ -n "$USE_VC" ]
+    then rev2="$1"; ver_flag2="${2:--r}"
+    else rev="$1"; ver_flag="${2:--r}"; USE_VC=true
+  fi
+}
+
+# push given argument(s) onto the end of the args[] array
+args_push() { for a in "$@"; do args[${#args[@]}]="$a"; done; }
+
+while [ -n "$1" ]; do
+  case $1 in
+
+    # VIM ARGS (args that need exceptions; the rest go through the catch-all)
+    -t | -q )		NO_VC=true; args_push "$1" ${2:+"$2"}; shift ;;
+    -[TuUcSswWi] | --cmd | --remote* | --servername \
+      | -font | -fn | -*display | --role \
+      | --socketit )	args_push "$1" ${2:+"$2"}; shift ;; # vim args w/ params
+    -geom* )		GEOM=true; args_push "$1" ${2:+"$2"}; shift ;;
+    -g )		GUI=true; args_push "$1" ;;
+    -f )		FG=true; args_push "$1" ;;
+    -reverse | -rv )	args_push "$1" ;; # here for collisions with rev
+
+    # OVERRIDDEN VIM ARGS
+    -h | --help )	help; exit 0 ;;  # un-overrides: --vim-help --gnome-help
+    -r | --rev )	if [ -n "$2" ] && ! [ -f "$2" ]
+    			  then set_rev "$2"; shift
+    			  else args_push "$1" # un-override, see also --swap
+    			fi ;;
+    -r* | --r*=* )	myrev="${1#-r}"
+    			if ! [ -f "${myrev#*=}" ]
+    			  then set_rev "${myrev#*=}"
+    			  else args_push "$1" # un-override, see also --recover
+    			fi
+    			unset myrev ;;
+    -D* )		myrev="${1#-D}"; do_shift=false
+    			if [ -z "$myrev" ]; then myrev="$2"; do_shift=shift; fi
+    			# ~BUG:  this date check partially depends on GNU date
+    			if date -d "${myrev:-invalid}" >/dev/null 2>&1
+    			  then set_rev "$myrev" -D; $do_shift
+    			  else args_push "$1"  # un-override, see also --debug
+    			       [ "x$1" = "x-D" ] && DEBUG=true # debug here, too
+    			fi
+    			unset myrev do_shift ;;
+
+    # NEW ARGS (including escapes for all overridden args)
+    --date )		set_rev "$2" -D; shift ;;	# -D  non-override alt
+    --date=* )		set_rev "${1#--date=}" ;;	# -D  non-override alt
+    --rev|--cvs|--svn|--vcs )	set_rev "$2"; shift ;; 	# -r  non-override alt
+    --rev=*|--cvs=*|--svn=*|--vcs=* )	set_rev "${1#--???=}" ;; # -r n-o alt
+    --snapshot )	USE_SNAPSHOT=true ;;
+    --vim-h* )		args_push -h; HELP=true ;; 	# alt for   vim -h
+    --gnome-help )	args_push --help; HELP=true ;;	# alt for   vim --help
+    --debug )		args_push -D; DEBUG=true ;;	# alt for   vim -D
+    --recover ) 	args_push -r ${2:+"$2"}; shift ;; # alt for vim -r FILE
+    --swap )		args_push -r ;; 		# alt for   vim -r
+    --nothing )         debug "--nothing (no-op)" ;;	# fix consecutive flags
+    --no-gui | -G )	NO_GUI=true ;;
+
+    # CATCH-ALL FOR REMAINING ARGS
+    -- )		shift; break ;;  # this is the "stop parsing args" arg
+    - | /dev/stdin )	NO_VC=true; args_push "$1" ;;
+    -* | +* )		args_push "$1" ;;
+    * ) 		break ;;
+  esac
+  shift
+done
+
+if [ -n "$NO_GUI" ]; then unset GUI; fi
+
+if [ -n "$HELP" ]; then exec vim "${args[@]}" ${1+"$@"}; exit $?; fi
+
+# if the GUI was requested but a geometry was not, use default geometry
+if [ -n "$GUI" -a -z "$GEOM" ]; then args_push -geometry "$DEFAULT_GEOM"; fi
+
+if [ -n "$DEBUG" ]
+  then debug() { echo "$*"; }; debug "$VIMDIFF: debug mode enabled"
+       SHH=/dev/stderr
+  else debug() { false; }
+       SHH=/dev/null
+fi
+
+initial="$1"
+basename="${1##*/}"
+dirname=`dirname "${1:-.}"`
+
+# Note to self:  P4DIFF='vim -Rd' p4 diff ...
+
+if [ -z "$NO_VC" ]; then
+  if [ -r "$1" ]; then
+    if ! grep "^[^/]*/$basename/" "$dirname/CVS/Entries" >/dev/null 2>&1; then
+      NO_CVS="true"
+    fi
+    if ! grep "^$basename$" "$dirname/.svn/entries" >/dev/null 2>&1; then
+      NO_SVN="true"
+    fi
+    if ! [ -d "$dirname/.snapshot" ]; then
+      NO_SNAP="true"
+    fi
+  else
+    if ! [ -r "CVS/Entries" ]; then NO_CVS="true"; fi
+    if ! [ -r ".svn/entries" ]; then NO_SVN="true"; fi
+    if ! ls .snapshot/* |grep . >/dev/null; then NO_SNAP="true"; fi
+  fi
+  if [ -n "$NO_CVS" -a -n "$NO_SVN" -a -n "$NO_SNAP" ]; then
+    if [ -n "$USE_VC" ]; then
+      echo "$VIMDIFF: '$basename' lacks CVS, SVN, and Snapshot versions" >&2
+      exit 2
+    fi
+    NO_VC=true
+  fi
+fi
+
+if [ -n "$USE_VC" ] || [ $# -lt 2 -a -z "$NO_VC" ]; then
+  debug "comparing to version control"
+
+  get_time() { ls -lt --full-time ${1:+"$@"} 2>/dev/null; }
+  if ! get_time -d . >/dev/null; then get_time() { ls -lt ${1:+"$@"}; }; fi
+
+  # no files means we want the first out-of-sync file in the current dir
+  if [ $# = 0 ]
+    # (how do I specify a revision for svn here? ... or do I not care?)
+    then file=`
+           (    ( [ -z "$NO_CVS" ] && cvs -n update $ver_flag "$rev" 2>$SHH ) \
+             || ( [ -z "$NO_SVN" ] && svn status --depth=files 2>$SHH ) \
+           ) |sed -e '/^[MU] */!d' -e s/// -e '1!d'`
+         if [ -z "$NO_SNAP$file" ]; then
+           for f in *; do
+             if [ -r ".snapshot/$f" -a "$f" -nt ".snapshot/$f" ] \
+             && ! diff ".snapshot/$f" "$f" >/dev/null 2>&1; then
+               file="$f"; break
+             fi
+           done
+         fi
+         if [ -z "$file" ]; then
+           echo "$VIMDIFF: Couldn't find a file to diff. Try specifying one" >&2
+           exit 2
+         fi
+         basename="${file##*/}"
+    else file="$1"
+  fi
+
+  # make a safe temp file using a method similar to vim's swap files
+  mytemp() {
+    local prefix rev
+    [ "$1" -gt 0 ] 2>/dev/null && rev="r"
+    rev="$rev$1"
+    prefix="$dirname/.$1"
+    if [ -e "$prefix.$basename" ]
+      then echo "$prefix.$basename"
+      else mktemp "$prefix.swXXX.$basename" 2>/dev/null \
+             || echo "$prefix.sw$$.$basename"
+    fi
+  }
+
+  orig=`mytemp "$rev"`
+  if [ -n "$rev2" ]; then orig2=`mytemp "$rev2"`; fi
+  trap "rm -f '$orig' ${orig2:+'$orig2'}" 0 1 2
+
+
+  # Usage: fetch -r|-D VERSION OUTPUT
+  # Get the specified cvs VERSION into OUTPUT file or else quit with error.
+  fetch() {
+    local fetch_err
+    debug "fetching version '$2' to output '$3'"
+
+    if [ "x$1" = "x-D" ]
+      then svn_rev="{$2}"
+      else svn_rev="$2"
+    fi
+
+    # if ( cvs out->OUTPUT err->|copy to debug, |grep for success ) fails
+    # and (svn -> OUTPUT, err == say FAIL) |grep for error   suceeds
+    if ! cvs -n update -p $1 "$2" "$file" 2>&1 >"$3" \
+      |tee $SHH |grep "^Checking out $file$" >/dev/null \
+    && (svn cat "$file@$svn_rev" 2>&1 >"$3" || echo FAIL) \
+      |tee $SHH |grep . >/dev/null
+    then
+      echo "Error on '$file' from CVS and Subversion at '$1'"
+      exit 2
+    fi
+
+    # adjust file modification stamp to VCS revision time
+    if [ "x$1" = "x-D" ]; then d="-d"; else d="$1"; fi # cvs log uses lowercase
+    d=`cvs log $d"$2" "$file" 2>$SHH |sed -e '/^date:/!d' -e s/// -e 's/;.*//'`
+    if [ -z "$d" ]; then # subversion
+      d=`svn log "$file@$svn_rev" 2>$SHH \
+          |sed -e '/^[^|]*|[^|]*| */!d' -e s/// -e 's/ *(.*//' -e q`
+    fi
+    touch -d "$d" "$3" >$SHH 2>&1
+
+    chmod -w "$3" # prevent writing to the file (you can't edit a VCS revision)
+  }
+
+
+  fetch $ver_flag "$rev"  "$orig"
+
+  if [ -n "$rev2" ]
+  then
+    fetch $ver_flag2 "$rev2" "$orig2"
+    set "$orig" "$orig2"
+  else
+    set "$orig" "$file"
+  fi
+
+fi
+
+if [ -n "$USE_SNAPSHOT" -a -z "$rev2" ] \
+|| [ -z "$USE_VC" -a $# -lt 2 -a -r "$initial" -a -d "$dirname/.snapshot" ]
+then
+  debug "comparing to snapshot version"
+
+  stamp=`get_time "$initial" |sed -e q |cut -d ' ' -f6,7`
+  snap=`get_time "$dirname"/.snapshot/*/"$basename" |sed -e "/ $stamp /d" \
+          -e "s|.* $dirname/.snapshot/|$dirname/.snapshot/|" -e q`
+
+  if [ -r "$snap" ]
+    then set "$snap" "$initial"
+    else debug "failed to get snapshot '$snap' for '$initial' at '$stamp'"
+  fi
+
+fi
+
+# found both a snapshot and a VCS version and the VCS ver differs from initial?
+if [ -r "$snap" -a -r "$orig" ] && ! diff "$orig" "$initial" >/dev/null; then
+  comp=`ls -t "$snap" "$orig" |sed -e q` # comp is the more recent of the two
+  set "$comp" "$initial"
+fi
+
+# If using GUI without -f (foreground), intercept it to handle cleanup properly.
+if [ -n "$GUI" -a -z "$FG" ]
+  then trap - 0 1 2	# disable cleanup trap since it would fire too early
+       debug "warning, debug mode for gvim in Debian(?) might break here..."
+       # run sub-shell in bg, which runs vim (fg in sub-shell) then the cleanup.
+       (vim -fd "${args[@]}" "$@" >$SHH 2>&1; rm -f "$orig" ${orig2:+"$orig2"})&
+  else vim -d "${args[@]}" "$@"  # used to use exec, but that breaks trap
+fi
