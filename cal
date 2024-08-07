@@ -1,150 +1,219 @@
 #!/bin/sh
-help() {
-  echo 'Wrapper for cal supporting month names, 9mo view, and nearest month'
-  "$REAL_CAL" -h 2>&1 |sed 's/\[\[month\] /[month] [/; s/-31/-139/'
-  cat <<'/help'
+help() { cat <<'/help'
+Wrapper for cal supporting month names, 9mo view, and relative/arbitrary dates
+Usage: cal [OPTIONS] [+][-][MONTH] [+][-][YEAR]
 
-The `-9` option gives a nine-month view centered on the target month (or now).
+  -1, --one          Display only the target month (default)
+  -3, --three        Display a row of the prior, target, and next months
+  -9, --nine         Display 3 rows centered on the target (like `-A 4 -B 4`)
+  -A, --after=NUM    Show this many months after the target month
+  -B, --before=NUM   Show this many months before the target month
+  -d, --date=DATE    Change the target date from today to DATE (in any format)
+  -j, --julian       Display days of the year (Julian days), e.g. Feb 1 = 32
+  -m, --month=MONTH  Display the specified month. Aborts the wrapper.
+  -W, --week=MIN     The first week of the year must contain MIN days
 
 If just given a month, shows calendar for closest instance of given month.
-See also `cal -m month` to use the current year (`-m` bypasses this script).
-`-m` allows 'f' and 'p' for following and previous years given decimal months.
+When a month or year is prefixed with + or - or +-, it is considered an offset
+relative to the current date.
 
 /help
   version
 }
 
+self="${0##*/}"
+url='https://github.com/adamhotep/misc-scripts'
+
 version() {
-  echo "cal-wrapper 0.2.20210801 copyright 2019+ by Adam Katz, GPL v2+"
-  echo "https://github.com/adamhotep/misc-scripts"
+  echo "Part of misc-scripts: $url"
+  echo "cal-wrapper 0.3.20240806.0 copyright 2019+ by Adam Katz, GPL v2+"
   exit
 }
 
-REAL_CAL="/usr/bin/cal"
+die() { [ $# -gt 0 ] && printf "%s\n" "$@" >&2; exit 2; }
+
+if ! command -v ncal >/dev/null; then
+  die 'You do not appear to have the `ncal` program that this wraps.' \
+      'Maybe try `apt install ncal` or something similar?'
+fi
 
 run() {
-  local RETVAL
-  if [ "$NINEMO" = 1 ]; then
-    "$REAL_CAL" "$@" $pre_mo $pre_yr
-  fi
-  "$REAL_CAL" "$@" ${month:+"$month"} ${year:+"$year"}
-  RETVAL=$?
-  if [ "$NINEMO" = 1 ]; then
-    "$REAL_CAL" "$@" $post_mo $post_yr
-  fi
-  exit $RETVAL
+  while [ -n "$arr" ]; do	# split (pop) options into $@
+    OPT="${arr##*$sep}"
+    arr="${arr%"$OPT"}"
+    arr="${arr%"$sep"}"
+    set -- "$OPT" "$@"
+  done
+
+  ncal -C "$@" ${month:+"$month"} ${year:+"$year"}
+  exit $?
 }
 
+# Usage: normalize STRING
+# Convert Unicode to ASCII and lowercase the input
+normalize() {
+  local non='[!0-9A-Za-z]'
+  # While I created https://stackoverflow.com/a/78790871/519360 for POSIX awk
+  # to properly lowercase Unicode text, converting to ASCII is preferable here.
+  # We only need to throw an error if non-ASCII-letters are to be analyzed.
+  case "$1" in
+    ( $non* | ?$non* | ??$non* | ???$non* )
+      if ! command -v utf2ascii >/dev/null; then
+        die "utf2ascii is needed for non-ASCII letters" "Get it at: $url"
+      fi
+      echo "$*" |utf2ascii
+      ;;
+    ( * ) echo "$*" ;;
+  esac |tr '[:upper:]' '[:lower:]'
+}
+
+# Usage: month NAME
+# Prints the number associated with month NAME. (This is locale-aware.)
 month() {
-  local m=0
-  case "$1" in	# yes, cal from bsdmainutils 11.1.2+b1 accepts "Mayonnaise"
-    ( [Jj][Aa][Nn]* ) m=1 ;;
-    ( [Ff][Ee][Bb]* ) m=2 ;;
-    ( [Mm][Aa][Rr]* ) m=3 ;;
-    ( [Aa][Pp][Rr]* ) m=4 ;;
-    ( [Mm][Aa][Yy]* ) m=5 ;;
-    ( [Jj][Uu][Nn]* ) m=6 ;;
-    ( [Jj][Uu][Ll]* ) m=7 ;;
-    ( [Aa][Uu][Gg]* ) m=8 ;;
-    ( [Ss][Re][Pp]* ) m=9 ;;
-    ( [Oo][Cc][Tt]* ) m=10 ;;
-    ( [Nn][Oo][Vv]* ) m=11 ;;
-    ( [Dd][Ee][Cc]* ) m=12 ;;
+  # afaict, LC_ALL trumps LANG which trumps LC_TIME, so we read in that order.
+  local m="$(normalize "$1")" lang=${LC_ALL:-$LANG}
+  if [ -z "$lang" ]; then lang="${LC_TIME:-en_US.UTF-8}"; fi
+  # Yes, cal truncates: `cal -m junk` works with FreeBSD 11.2 & ncal 12.1.8
+  # Shortcut: we always accept certain common abbreviations, incl all English.
+  # Abbreviations from https://web.library.yale.edu/cataloging/months#page-title
+  # Supported: en de es fr it pl pt ro (note how they're alphabetical)
+  case "${lang%%_*}:$m" in
+    # NOTE: this is after converting Unicode to ASCII -- no accents here!
+    ( *:jan* | es:ene* | it:gen* | pl:sty* | ro:ian* ) m=1 ;;
+    ( *:feb* | fr:fev* | pl:lut* | pt:fev* ) m=2 ;;
+    ( *:mar* ) m=3 ;;
+    ( *:apr* | es:abr* | fr:avr* | pl:kwi* | pt:abr* ) m=4 ;;
+    ( *:may* | *:mai* | it:mag* | pl:maj* ) m=5 ;;
+    ( *:jun* | fr:juin* | it:giu* | pl:cze* | ro:iun* ) m=6 ;;
+    ( *:jul* | fr:juil* | it:lug* | pl:lip* | ro:iul* ) m=7 ;;
+    ( *:aug* | es:ago* | fr:aou* | it:ag* | pl:sie* | pt:ago* ) m=8 ;;
+    ( *:sep* | it:set* | pl:wrz* | pt:set* ) m=9 ;;
+    ( *:oct* | de:okt* | it:ott* | pl:paz* | pt:out* ) m=10 ;;
+    ( *:nov* | pl:lis* | ro:noi* ) m=11 ;;
+    ( *:dec* | de:dez* | es:dic* | it:dic* | pl:gru* | pt:dez* ) m=12 ;;
+    ( * ) [ ! "$m" -le 12 ] 2>/dev/null && die "$self: invalid month '$1'" ;;
   esac
   echo "$m"
+}
+
+# Usage: dateas [DATE_OPTIONS] [+DATESPEC]
+# Convert the date (trumped by "$now") to DATESPEC format
+# With BSD date, DATESTRING must itself use DATESPEC +%Y-%m-%d, e.g. 2024-07-28
+dateas() {
+  local ymd="%Y-%m-%d" tmp="${1#@}" now
+  if [ "$1" != "$tmp" ]; then
+    now="$tmp"
+    shift
+  fi
+  if [ $# = 0 ]; then set -- +"$ymd"; fi
+  if [ -n "$now" ]; then
+    # GNU date (any format) or else BSD date (YYYY-MM-DD only)
+    date -d "$now" "$@" 2>/dev/null || date -jf "$ymd" "$now" "$@"
+  else
+    date "$@"
+  fi
 }
 
 if [ $# = 0 ]; then
   run
 fi
 
-ABORT=0 NINEMO= POST=
-while getopts abcdefghijklm:nopqrs:tuvwxyzA:B:CD:EFGH:IJKLMNOPQRSTUVWXYZ0123456789-: opt 2>/dev/null; do
-  case $opt$OPTARG in
-    ( 9 )		NINEMO=1 ;;
-    ( [13y] )		NINEMO=0 ;;	# these overide -9 if later
-    ( h | -help )	help ;;
-    ( m )		ABORT=1 ;;	# bypass script
-    ( [Vv] | -ver* )	version ;;
-  esac
-done
-# note the lack of a shift here
+sep="\`$TTY\`$$\`"
+arr=""
+push() { local i; for i in "$@"; do arr="$arr${arr:+$sep}$i"; done; }
 
-argv=$# 		# parameter count
-optv=$((OPTIND-1))	# option count
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
-count=0 month= year= pre_mo= pre_yr= post_mo= post_yr=
-for parameter in "$@"; do
-  count=$((count + 1))
-  if [ "$count" = 1 ]; then set --; fi	# clear parameter list
-  if [ "$count" -le $optv ]; then
-    case "$parameter" in
-      ( -*[mABDH-]*9* )	set -- "$@" "$parameter" ;; # `9` in option's argument
-      ( -*9* )		set -- "$@" "${parameter%%9*}3${parameter#*9}" ;; # 9->3
-      ( * )		set -- "$@" "$parameter" ;;
-    esac
-  elif [ "$count" = "$argv" ] && [ "$((argv - optv))" = 2 ]; then
-    year="$parameter"
-  else
-    month="$parameter"
+abort=
+month=
+year=
+
+# official options disallowed with `ncal -C`: b e h(!) H(!) J M o p s S w W
+while getopts 139A:B:Cd:hjm:vVW:y-: OPT; do
+  if [ "$OPT" = - ]; then  # --long: https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#"$OPT"}" OPTARG="${OPTARG#=}"
   fi
+  case "$OPT" in
+    ( 1 | one* )	push -1 ;;
+    ( 3 | three* )	push -3 ;;
+    ( 9 | nine* )	push -A4 -B4 ;;
+    ( A | after )	needs_arg; push -A "$OPTARG" ;;
+    ( B | before )	needs_arg; push -B "$OPTARG" ;;
+    ( C )		: "ignoring redundant -C" ;;
+    ( d | date )	needs_arg; now="$(dateas "@$OPTARG")"; push -d "$now" ;;
+    ( h | help )	help ;;  # note, the other -h is somehow just for ncal
+    ( j | julian )	push -j ;;
+    ( m | month)	abort=abort; push -m "$OPTARG" ;;	# bypass script
+    ( [Vv] | -ver* )	version ;;
+    ( W | week-min* )	needs_arg; push -W "$OPTARG" ;;
+    ( y | year* )	push -y ;;
+    ( \? )		die ;; # bad short option (error reported via getopts)
+    ( * )		die "Illegal option --$OPT" ;; # bad long option
+  esac
 done
-# $@ should now be JUST the options. No month, no year.
+shift $((OPTIND-1))
 
-if [ "$NINEMO" = 1 ]; then
-  pre_mo="$month"	# not yet "pre"
-  pre_yr="$year"	# not yet "pre"
-  if [ -z "$pre_mo" ]; then pre_mo=$(date +%m); fi
-  if [ -z "$pre_yr" ]; then pre_yr=$(date +%Y); fi
-  post_yr="$pre_yr"
-  pre_mo=${pre_mo#0}	# strip leading zero when present (prevent octal math)
-  post_mo=$((pre_mo + 3))
-  pre_mo=$((pre_mo - 3))
-  case $pre_mo in
-    ( 0 )	pre_mo=12 pre_yr=$((pre_yr - 1)) ;;
-    ( -1 )	pre_mo=11 pre_yr=$((pre_yr - 1)) ;;
-    ( -2 )	pre_mo=10 pre_yr=$((pre_yr - 1)) ;;
-  esac
-  case $post_mo in
-    ( 13 )	post_mo=1 post_yr=$((pre_yr + 1)) ;;
-    ( 14 )	post_mo=2 post_yr=$((pre_yr + 1)) ;;
-    ( 15 )	post_mo=3 post_yr=$((pre_yr + 1)) ;;
-  esac
-fi
-
-# if we're aborting  or  there's no year or the year is under 100
-#   or all parameters are options or the month isn't by name
-if [ "$ABORT" = 1 ] || [ "${year:-0}" -ge 100 ] 2>/dev/null \
-  || [ $optv = $argv ] || [ "${month:-none}" = "${month#[JFMAJSONDjfmajsond]}" ]
-then
+if [ "$abort" = abort ]; then
   run "$@"
 fi
 
-# two digit year: expand to closest year (in Feb 2019, 69->1969, 68->2068)
-if [ "$year" -ge 10 -a "$year" -lt 100 ] 2>/dev/null; then
-  now="$(date +%Y%j)"
-  now_dayofyear=${now#????}
-  now_year=${now%$now_dayofyear}
-  # round to half year (one day off during leap years, whatever)
-  if [ "1$now_dayofyear" -ge 1182 ]; then now_year=$((now_year + 1)); fi
-  year="${now%??$now_dayofyear}$year"
-  if [ $((now_year + 50)) -le "$year" ]; then
-    year=$((year - 100))
-  elif [ $((year + 50)) -lt "$now_year" ]; then
-    year=$((year + 100))
+# Parse remaining parameters into $month and $year
+abs="${1#+}"
+if [ $# -gt 2 ]; then	# too many arguments
+  m="$1" y="$2"
+  shift 2
+  die "Error: unexpected arguments after month \`$m\` and year \`$y\`: $*"
+elif [ -n "$1" ] && ! [ "${abs#-}" -gt 0 ] 2>/dev/null; then # non-numeric month
+  month="$(month "$1")" year="$2"
+elif [ $# = 2 ]; then
+  month="${1#0}" year="$2"	# remove month's leading zero if there is one
+elif [ $# = 1 ]; then
+  if [ "$abs" != "${1#-}" ]; then
+    month="$1"
+  else
+    year="$1"
   fi
-elif [ -z "$year" ]; then
-  #date -d "$1 15" +%Y 2>/dev/null && return	# GNU date
-  now="$(date +%Y%m)"
-  year="${now%%??}"	# current year
-  mon="${now#????}"	# current month
-  mon="${mon#0}"	# remove zero-padding to avoid octal interpretation
-  m="$(month $month)"
-  if [ $((m + 6)) -lt $mon ]; then
+fi
+
+# year by offset or as 2-digit abbrev (no conflicts: ncal only supports year 1+)
+case "$year" in
+  ( [+-]*[!0-9]* )	die "$self: not a valid year '$year'" ;;
+  ( [+-]* )		year=$((${year#+} + $(dateas +%Y))) ;;	# year by offset
+  ( \'[0-9][0-9] | [0-9][0-9] ) 			# 2-digit year
+    tmp="$(dateas +%Y%j)"	# %j is padded to 3 digits, so Feb 1 = 032
+    year="${tmp%?????}${year#\'}"	# use current century for given year
+    if [ $((tmp + 50183)) -le ${year}000 ]; then  # if (now + 50.5y <= $year)
+      year=$((year - 100))
+    elif [ $(( ${year}000 + 50000 )) -lt $tmp ]; then
+      year=$((year + 100))
+    fi
+    ;;
+esac
+
+# Relative month
+if [ "$month" != "${month#[+-]}" ]; then	# month by offset
+  # The leading 1 adds 100 to guard against octal interpretation. We then add
+  # the offset and subtract that 100 and one to zero-index, so Jan=0, Dec=11.
+  month=$(( 1$(dateas +%m) + ${month#+} - 101 ))
+  if [ $month -gt 11 ]; then
+    year=$((year + (month + 12)/12))
+  elif [ $month -lt 0 ]; then
+    year=$((year + (month - 12)/12))
+  fi
+  # -1 % 12 = -1  so we pad with +10,000y of months:  (120000 + -1) % 12 = 11
+  month=$(( (120000 + month) % 12 + 1 ))  # pad, modulo, convert to one-index
+fi
+
+if [ -z "$year" ] && [ -n "$month" ]; then  # no year: use the closest to $month
+  now="$(dateas +%Y%m)"
+  year="${now%%??}"		# current year
+  now_month="${now#????}"	# current month
+  now_month="${now_month#0}"	# remove zero-padding (no octal!)
+  if [ $((month + 6)) -lt $now_month ]; then
     year=$((year + 1))
-  elif [ $((mon + 6)) -lt $m ]; then
+  elif [ $((now_month + 6)) -lt $month ]; then
     year=$((year - 1))
   fi
 fi
 
-run "$@"
+run
