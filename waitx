@@ -1,0 +1,158 @@
+#!/bin/sh
+help_base() { cat <</help
+Wait until all given PIDs complete.
+Usage: ${0##*/} [-w WAIT_TIME] PID [PID...]
+  -F, --pidfile=FILE     Read the list of PIDs from the given FILE
+  -h, --help             Display this helpful help
+  -q, --query            Instead of PIDs, use \`pgrep\` patterns
+  --query-help           Show the list of query options (\`-q\` or \`--query\`)
+  -v, --verbose          Describe what we're waiting for
+                         Verbose output is colorized unless \$NO_COLOR is set
+  -w, --wait=WAIT_TIME   Polling interval (defaults to 5.0s)
+
+/help
+}
+help() {
+  help_base
+  if [ -z "$LINES" ]; then LINES="$(tput lines)"; fi
+  # if we're piped or query is enabled or it fits on one page, show query help
+  if [ ! -t 1 ] || [ -n "$use_pgrep" ] \
+  || [ "$LINES" -gt $(( $({ help_base; query_help; } |wc -l) + 3)) ]; then
+    query_help
+    echo
+  fi
+  version
+}
+
+version() {
+  echo "Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
+  echo "waitx 2.1.20240806.0 copyright 2004+ by Adam Katz <@adamhotep>, GPLv3+"
+  exit
+}
+
+query_help() { cat <</query_help
+Query options (these all enable \`-q\` or \`--query\`)
+  -f, --full             Query the full command line
+  -g, --pgroup=PGROUP    Query only the given process group ID
+  -G, --group=GROUP      Query only the given group ID
+  -i, --ignore-case      Query without regard to case
+  -n, --newest           Query only the most-recently-started match
+  --ns=PID               Query just the namespace of PID
+  --nslist=NAMESPACE     Query by namespace: ipc, mnt, net, pid, user, or uts
+  -o, --oldest           Query only the least-recently-started match
+  -O, --older=SECS       Query only PIDs older than SECS
+  -P, --parent=PPID      Query only children processes of PPID
+  -r, --runstates=STATE  Query only proccess of state(s) D,R,S,Z,...
+  -s, --session=SID      Query only processes with the given session ID
+  -t, --terminal=TERM    Query only processes controlled by TERM
+  -u, --euid=EUID        Query only processes with this effective user ID
+  -U, --uid=UID          Query only processes with this real user ID
+  -x, --exact            Query only exact matches (with -f, full command)
+/query_help
+}
+
+die() { printf '%s\n' "$@" >&2; exit 2; }
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+# note: save_arg only works here because none of the arguments accept spaces
+wait_time=5 pgrep_args= pidfile= use_pgrep= get_help=
+save_arg() { pgrep_args="$pgrep_args $@"; }
+while getopts fF:g:G:hinoO:P:qr:s:t:u:U:vVw:x:-: OPT; do
+  if [ "$OPT" = - ]; then # long opt https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#"$OPT"}" OPTARG="${OPTARG#=}"
+  fi
+  case $OPT in
+    ( f | full )	save_arg "--full" ;;
+    ( F | pidfile )	needs_arg; pidfile="$OPTARG" ;;
+    ( g | pgroup )	needs_arg; save_arg "--pgroup $OPTARG" ;;
+    ( G | group )	needs_arg; save_arg "--group $OPTARG" ;;
+    ( h | help* )	get_help=1 ;;
+    ( i | ignore-case )	save_arg "--ignore-case" ;;
+    ( n | newest )	save_arg "--newest" ;;
+    ( ns | namespace )	needs_arg; save_arg "--ns $OPTARG" ;;
+    ( n*s*list )	needs_arg; save_arg "--nslist $OPTARG" ;;
+    ( o | oldest )	save_arg "--oldest" ;;
+    ( O | older )	needs_arg; save_arg "--older $OPTARG" ;;
+    ( P | parent )	needs_arg; save_arg "--parent $OPTARG" ;;
+    ( query*help* )	query_help; exit ;;
+    ( q | query* )	use_pgrep=1 ;;
+    ( r | runstate* )	needs_arg; save_arg "--runstates $OPTARG" ;;
+    ( s | session* )	needs_arg; save_arg "--session $OPTARG" ;;
+    ( t | term* )	needs_arg; save_arg "--terminal ${OPTARG#/dev/}" ;;
+    ( u | euid )	needs_arg; save_arg "--euid $OPTARG";;
+    ( U | uid ) 	needs_arg; save_arg "--uid $OPTARG";;
+    ( v | verb* )	verbose=1 ;;
+    ( V | ver* )	get_version=1 ;;
+    ( w | wait | poll )	needs_arg; wait_time="$OPTARG" ;;
+    ( x | exact )	save_arg "--exact" ;;
+    ( ??* )		die "Illegal option --$OPT" ;;  # bad long option
+    ( ? )		exit 2 ;;  # bad short option (error via getopts)
+  esac
+done
+shift $((OPTIND-1))
+
+if [ -n "$pgrep_args" ]; then
+  use_pgrep=1
+fi
+
+if [ -n "$get_help" ]; then
+  help
+elif [ -n "$get_version" ]; then
+  version
+fi
+
+if [ -n "$pidfile" ]; then
+  # sooo much less work when we don't have to handle spaces!
+  set -- "$@" $(cat "$pidfile")
+elif [ -n "$pgrep_args$use_pgrep" ]; then
+  # easier bc PIDs can't have spaces ... hopefully pgrep opts/args is the same
+  set -- $(pgrep $pgrep_args "$@" |awk -v this=$$ '$1 != this')
+fi
+
+poll() {
+  sleep "$wait_time"
+}
+
+# before implementing verbose, I used Linux procfs to limit `ps` calls
+#if [ -d "/proc/$$" ]; then	# procfs (most Linux systems)
+#  for pid in "$@"; do
+#    while [ -d "/proc/$pid" ]; do poll; done
+#  done
+#else
+
+newline='
+'
+
+pslist=
+while true; do
+  oldpslist="$pslist"
+  pslist="$(ps -f "$@")"	# -f gives us PPID, which we need for no-args
+  if [ $# = 0 ]; then		# no-args: other jobs in this shell session
+    pslist="$(echo "$pslist" |awk -v PID=$$ -v PPID=$PPID -v this="${0##*/}" '
+      NR == 1 {
+        for (c = 1; c <= NF; c++) {
+          if      ($c == "PID")  pid  = c
+          else if ($c == "PPID") ppid = c
+          else if ($c == "CMD")  cmd  = c
+        }
+      }
+      $pid != PID && $pid != PPID && $ppid != PID # print unless waitx or parent
+    ')"
+  fi
+  if [ "$pslist" = "${pslist#*$newline?}" ]; then
+    break	# done!
+  elif [ -n "$verbose" ] && [ "$pslist" != "$oldpslist" ]; then
+    echo "${oldpslist:+$newline}Waiting for:"
+    if [ -z "$NO_COLOR" ] && [ -n "$CLICOLOR_FORCE" -o -t 1 ]; then
+      if command -v grcat >/dev/null; then	# use GRC for colors
+        echo "$pslist" |grcat conf.ps
+      else	# manually bold (code 1) and underline (code 4) the title row
+        title="${pslist%%$newline*}"
+        printf '\033[1;4m%s\033[m%s\n' "$title" "${pslist#$title}"
+      fi
+    else
+      echo "$pslist"	# report changed list of what we're waiting for
+    fi
+  fi
+  poll
+done
+
