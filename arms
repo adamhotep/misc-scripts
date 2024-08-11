@@ -1,0 +1,219 @@
+#!/bin/bash
+# This uses bash for its `read` builtin (only used with --bytes on a non-file).
+# It is otherwise portable POSIX shell and therefore also works with ksh & zsh.
+help() { cat <</help
+Usage: arms [OPTION] [FILE...]
+Print the first and final ten lines of each FILE to standard output
+
+  -c, --bytes=NUM       Byte mode: print the first NUM bytes of each file
+  --color[=WHEN]        Color the output (headers and delimiter)
+                        WHEN is one of: \`always\`, \`auto\`, or \`never\`
+                        \`--color\` is the same as \`--color=always\`
+                        \$NO_COLOR or \$CLICOLOR_FORCE will change the default
+  -d, --delim=STR       Use STR as a delimiter rather than \`$delim\`
+  -D, --no-newline      Don't add newlines around the delimiter in byte mode
+  -m, --middle          When truncating, remove the middle (preserve edges)
+  -n, --lines=NUM       Print the first NUM lines of each file instead of 10
+  -q, --quiet           Do not display headers with file names
+  -r, --right           When truncating, preserve the right side
+  -t, --truncate[=NUM]  Truncate to the terminal width (default=$COLUMNS)
+  -T, --no-truncate     Do not truncate the output
+  -v, --verbose         Always display headers with file names
+  -w, --width=NUM       Truncate output to NUM bytes (1=auto, same as -t)
+
+/help
+  version
+}
+
+git="https://github.com/adamhotep/misc-scripts"
+
+version() {
+  echo "Part of misc-scripts: $git"
+  echo "arms 0.5.20240807.0 copyright 2003+ by Adam Katz, GPL v2+"
+  exit
+}
+
+# complain to STDERR (one line per argument) and exit with error
+die() { for line in "$@"; do echo "$line" >&2; done; exit 2; }
+
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+vet_number() {
+  if [ "$1" -lt 1 ] 2>/dev/null; then
+    die "Number '$1' must be at least 1"
+  elif ! [ "$1" -ge 1 ] 2>/dev/null; then
+    die "Invalid number '$1'"
+  fi
+}
+
+# defaults
+delim='--'
+middle=''
+newline='\n'
+num=''
+right=''
+truncate=1
+units=lines
+
+# default colors are set by environment variables or else are auto-detected
+if [ -n "$NO_COLOR" ]; then
+  color=never
+elif [ -n "$CLICOLOR_FORCE" ]; then
+  color=always
+else
+  color=auto
+fi
+
+while getopts 0123456789c:d:Dhmn:qrtTvVw:-: OPT; do
+  # support long options: https://stackoverflow.com/a/28466267/519360
+  if [ "$OPT" = "-" ]; then	# long option: reformulate OPT and OPTARG
+    OPT="${OPTARG%%=*}" 	# extract long option name
+    OPTARG="${OPTARG#"$OPT"}"	# extract long option argument (may be empty)
+    OPTARG="${OPTARG#=}"	# if long option argument, remove assigning `=`
+    long='-'			# remember that this was a long option
+  else
+    long=''
+  fi
+  case "$OPT" in
+    [0-9] )		units=lines num=$num$OPT ;;	# yes, -2r2 = -r -n22
+    c | byt* | char* )	units=bytes num="$OPTARG" ;;	# long arg is optional!
+    color | colour )	color="${OPTARG:-always}" ;;	# no arg means `always`
+    d | delim* )	needs_arg; delim="$OPTARG" ;;
+    D | no*line* )	newline='' ;;
+    h | help* ) 	help ;;
+    m | middle )	middle="$long-$OPT" ;;
+    n | lines ) 	needs_arg; units=lines num="$OPTARG" ;;
+    q* | silent )	headers=0 ;;
+    r | *right* )	right=1 ;;
+    t | trunc* )	truncate="${OPTARG:-1}" ;;
+    T | no*trunc* )	truncate='' ;;
+    v | verbose )	headers=1 ;;
+    V | version )	version ;;
+    w | width ) 	needs_arg; truncate="$OPTARG" ;;
+    \? )		exit 2 ;;
+    * ) 		die "Illegal option --$OPT" ;;
+  esac
+done
+shift $((OPTIND-1))
+
+vet_number "${num:=10}"
+vet_number "$truncate"
+
+case $color in
+  always | [Yy]* | 1 )	color=1 ;;
+  auto )		if [ -t 1 ]; then color=1; else color=''; fi ;;
+  [Nn]* | 0 | '' )	color='' ;;
+  * ) 			die "Invalid color '$color', see \`${0##*/} --help\`" ;;
+esac
+fn= se= c0=
+if [ -n "$color" ]; then
+  CLICOLOR_FORCE=1 fn='[35m' se='[36m' c0='[m'
+  case $delim in ( *[![:space:]]* ) delim="$se$delim$c0" ;; esac
+fi
+
+# if quiet/verbose is not yet set, show headers iff there are 2+ files to view
+if [ "$headers" != 0 ] && [ "$headers" != 1 ]; then
+  [ "$#" -le 1 ]
+  headers=$?
+fi
+
+if [ -n "$truncate" ]; then
+  if [ "$truncate" -le 1 ]; then truncate="$COLUMNS"; fi
+  if command -v trunc >/dev/null; then
+    truncate() { trunc ${right:+-r} ${middle:+-m}; }
+  else
+    if [ -n "$middle" ]; then
+      die "The \`$middle\` feature requires the \`trunc\` script:" "$git"
+    fi
+    truncate() {
+      local GREP_COLORS= GREP_OPTIONS= A= B=^
+      if [ -n "$right" ]; then
+        A='$' B=''
+      fi
+      if command -v expand >/dev/null; then
+        expand
+      else
+        cat
+      fi |egrep -o "$B.{0,$truncate}$A"
+    }
+  fi
+else
+  truncate() { cat; }
+fi
+
+first=1
+for file in "${@:-/dev/stdin}"; do
+
+  if [ "$file" = "-" ]; then file="/dev/stdin"; fi
+  if [ "$file" = "/dev/stdin" ]; then
+    name="standard input"
+  else
+    name="$file"
+  fi
+
+  if [ "$headers" = 1 ]; then
+    if [ "$first" = 1 ]; then
+      unset first
+    else
+      echo ""
+    fi
+    echo "$se==>$c0 $fn$name$c0 $se<==$c0"
+  fi
+
+  if [ "$units" = bytes ]; then
+
+    if [ ! -f "$file" ]; then	# non-files can only be read once
+      if [ -n "$BASH_VERSION$KSH_VERSION" ]; then # bash or ksh, even as /bin/sh
+        IFS= read -r -N $num head < "$file"	# bashism used to read per-byte
+      elif [ -n "$ZSH_VERSION" ]; then
+        IFS= read -r -u 0 -k $num head < "$file"	# zsh equivalent
+      else
+        die "Reading non-files by the byte requires bash, ksh, or zsh."
+      fi
+      printf "%s$newline%s$newline" "$head" "$delim"
+      tail -c $num "$file"
+    else
+      # TODO: change this. only GNU does this quickly, the rest all suck.
+      # I should use GNU stat and fail over to BSD stat THEN ls (or du?)
+      if [ $(wc -c < "$file") -le $((num * 2)) ]; then	# small enough to cat
+        cat "$file"
+      else
+        head -c $num "$file"
+        if [ -n "$delim" ]; then
+          printf "$newline%s$newline" "$delim"
+        else
+          printf "$newline"
+        fi
+        tail -c $num "$file"
+      fi
+    fi
+
+  else	# lines
+
+    if [ ! -f "$file" ]; then	# non-files can only be read once
+      n=$num
+      while [ $((n = n - 1)) -ge 0 ]; do
+        IFS= read -r line < "$file"
+        printf "%s\n" "$line"
+      done
+      if [ -n "$delim" ]; then
+        printf '%s\n' "$delim"
+      fi
+      tail -n $num "$file"
+    else
+      # read and print the first set of lines (head),
+      # read the same number of lines after the head, saving them in `tail`,
+      # exit if we've exceeded that twice over.
+      # after reading: if we read fewer than 2x, print the rest of the file.
+      # otherwise, exit 1 so we can run tail to get the rest
+      awk -v num=$num -v tail="$delim" '
+        NR <= num { print; next }
+        { tail = tail ORS $0 }
+        NR >= num * 2 { exit }	# does not actually exit, just stops reading
+        END { if (NR <= num * 2) { print tail; exit 1 } }
+      ' "$file" && tail -n $num "$file"
+    fi
+
+  fi
+done |truncate
+
