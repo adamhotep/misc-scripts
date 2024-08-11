@@ -1,0 +1,111 @@
+#!/bin/sh
+summary="Alert by beeping or flashing the console"
+version="beep 0.3.20240519.0 Copyright 2000+ by Adam Katz, GPL v2+"
+website="Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
+# Run --help to learn more
+
+# sameas(): True when this program ($0) is the same as the argument ($1) {{{
+sameas() {
+  local a="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+  local b="$(readlink -f "$1" 2>/dev/null || echo "$1")"
+  [ "$0" = "$1" ] || [ "$a" = "$1" ] || [ "$0" = "$b" ] || [ "$a" = "$b" ] \
+    || diff -q "$0" "$1" >/dev/null 2>&1
+}
+# }}} end of sameas()
+
+# Set secondary `beep` program for audible bells (if any) to $app {{{
+app=
+# if not remote and we have a console beep app save that as $app
+if [ -z "$SSH_TTY" ]; then
+  # allow name collisions: we want the first `beep` that isn't THIS.
+  app="$(
+    IFS=:
+    for path in $PATH; do
+      b="$path/beep"
+      if [ -x "$b" ] && [ "$b" != "$0" ] && ! sameas "$b"; then
+        echo "$path/beep"
+        break
+      fi
+    done
+  )"
+  if [ -n "$app" ]; then
+    app_options=" [BEEP_OPTIONS]"
+  fi
+fi
+# }}} end of audible bell program detection
+
+help() {
+  echo "$summary"
+  iam="${0##*/}"
+  u="Usage:"
+  usage="[--visual|-v]$app_options"
+  vusage="[--audible|-a]$app_options"
+
+  linkme() { printf '\nSymlink this to `%s` for flagless support\n' "$1"; }
+  case "$iam" in
+    ( vb* )
+      beep="${0%/*}/${iam#v}"
+      if sameas "$beep"; then
+        echo "$u ${iam#v} $usage"
+        u="      "
+      else linkme "$beep"
+      fi
+      echo "$u $iam $vusage"
+      ;;
+    ( * )
+      vbeep="${0%/*}/v$iam"
+      echo "$u $iam $usage"
+      if sameas "$vbeep"; then
+        echo "       v$iam $vusage"
+      else linkme "$vbeep"
+      fi
+      ;;
+  esac
+  echo ""
+  echo "  --visual, -v    Silently flash the console"
+  echo "  --audible, -a   Sound a bell"
+  if [ -n "$app_options" ]; then
+    echo ""
+    echo "  BEEP_OPTIONS are observed unless we're in visual bell mode."
+    echo "  More detail at \`$iam -a --help\`"
+  fi
+  echo ""
+  version
+}
+version() {
+  if [ -x "$app" ]; then
+    "$app" --version 2>&1 |awk 'NR == 1 { print "Using " $0; exit }'
+  fi
+  printf "%s\n%s\n" "$website" "$version"
+  exit
+}
+
+if [ "${1#--help}" != "${1#-h}" ]; then
+  help
+elif [ "${1#--ver}" != "${1#-V}" ]; then
+  version
+fi
+
+visual=
+audible=
+if   [ "${1#--vis}" != "${1#-v}" ]; then visual=1; shift
+elif [ "${1#--aud}" != "${1#-a}" ]; then audible=1; shift; fi
+
+# visual bell if (named (vbeep or vbell) and not --audible/-a) or if --visual/-v
+if [ "$0" != "${0%vbe*}" -a -z "$audible" ] || [ -n "$visual" ]; then
+  tput flash 2>/dev/null || {
+    # fallback method
+    printf "\e[?5h"	# un-reverse video
+    # GNU, BSD/Mac, & Busybox support decimals. Perl fallback loads in ~0.01s
+    sleep 0.1 2>/dev/null || perl -e 'select(undef, undef, undef, 0.09)'
+    printf "\e[?5l"	# reverse video
+  } 2>/dev/null
+  exit $?
+fi
+
+if [ -x "$app" ]; then	# if we have a console beep app, use it now
+  exec "$app" "$@"
+else			# otherwise, print the alert sequence
+  printf "\a"
+fi
+
