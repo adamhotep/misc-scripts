@@ -1,27 +1,28 @@
 #!/bin/sh
-help() { cat <</help
-Drop-in replacement for [g]vimdiff.
-With no files, opens a blank diff. With one file, tries to find something
-to diff against from git, a snapshot directory, or a SyncThing revision.
-
-/help
-
-  if [ "$full_help" = 1 ] || [ ! -t 1 ] || [ "$(tput lines)" -gt 92 ]; then
-    vim --help 2>&1 |awk -v self=" $self " '{ gsub(" vim ", self) } NR > 2'
-  else
-    echo "Usage: vimdiff [arguments] [file ...]"
+help() {
+  if [ "$full_help" = 1 ] || [ ! -t 1 ] || [ "$(tput lines)" -gt 99 ]; then
+    # Run `vim --help`, update the name, print after line 2
+    usage=$("$vim" --help 2>$dn |awk -vi=" $self " '{ sub(" vim ", i) } NR > 2')
+    tall=1
   fi
-
   cat <</help
+Drop-in replacement for [g]vimdiff.
+Given one file, compares to git, SyncThing, snapshots, or else backup names.
+
+${usage:-Usage: vimdiff [arguments] [file ...]}
 
 Arguments recognized by vimdiff-auto wrapper (@adamhotep misc-scripts):
-   --full-help          Also show vim options here
+   --full-help          Include vim command-line help$([ -n "$tall" ] && echo "
+   --help               Display this command-line help and exit
+   --test, --noop       Report the vim command but do not run it
+   --version            Display vim & vimdiff-auto version info and exit")
+   --exec <path>        VIM executable, currently \`$vim\`
    --snapshot <path>    Snapshot directory (absolute or relative to the file).
                         ZFS snapshots are auto-detected UNLESS this path exists.
                         Non-ZFS snapshots (e.g. for NetApps) are experimental.
                         Currently \`$snapshot\`
    --syncthing <path>   SyncThing versions directory (relative or absolute).
-                        Currently \`$stversions\`"
+                        Currently \`$syncthing\`
 
 Install ahead of vimdiff in your \$PATH like /usr/local/bin/vimdiff and create a
 symlink named gvimdiff that points to it (if you have gvim installed).
@@ -30,12 +31,22 @@ symlink named gvimdiff that points to it (if you have gvim installed).
   version
 }
 
+# Debug mode is supported by running as `sh -x /path/to/this/vimdiff`
+# You can alternatively use bash or zsh for ~better xtrace information.
+
 version() { cat <</version
-Wraps $({ vim --help 2>/dev/null || echo vim; } |head -n1)
+Wraps $(vim_version "vim (version unknown, '$vim --help' failed)")
 Part of misc-scripts:  https://github/adamhotep/misc-scripts
-vimdiff-auto 2.1.20240804.0 copyright 2009+ by Adam Katz <@adamhotep>, GPLv3
+vimdiff-auto 2.2.20240810.0 copyright 2009+ by Adam Katz, GPLv3
 /version
   exit
+}
+
+# Usage: vim_version FALLBACK_TEXT
+# Parse `vim --help` and get the version (line 1) or else show FALLBACK_TEXT
+vim_version() {
+  # GNU, BSD, and Busybox all support `grep -m NUMBER`
+  "$vim" --help 2>$dn |grep -m1 . || echo "$*"
 }
 
 # Version 1.x (`vimdiff+cvs`) could also automatically traverse CVS & Subversion
@@ -53,23 +64,33 @@ escape_glob() { echo "$*" |sed 's/[\]\[\\*?]/\\&/g'; }
 # This could probably use some more security vetting.
 escape_squot() { gitcmd="$gitcmd '$(echo "$*" |sed "s/'/'\\''/g")'"; }
 
+# Usage: differ OLD FILE
+# Prints OLD and returns true when OLD is a nonzero file NOT identical to FILE
+differ() {
+  if [ -f "$1" ] && [ -s "$1" ] && ! diff -q "$@" >$dn; then
+    echo "$1"
+    return 0
+  fi
+  return 1
+}
+
 # Usage: git_diff [DIR] FILE
 # If git tracks FILE, vimdiff it vs git HEAD (even if there are no differences)
 git_diff() {
-  : "Seeking a git revision for <$1>"
   local owd="$PWD"
-  if ! command -v git >/dev/null; then
+  if ! command -v git >$dn; then
     : "git is not installed, skipping git diff"
     return 1
   fi
+  : "Seeking a git revision for <$1>"
   if [ "$PWD" != "${1%/*}" ]; then cd "${1%/*}"; fi
-  #if git ls-files --error-unmatch "$1" 2>/dev/null; then	# git tracked?
-  git diff --quiet "$last" 2>/dev/null
+  #if git ls-files --error-unmatch "$1" 2>$dn; then	# git tracked?
+  git diff --quiet "$last" 2>$dn
   case $? in
-    ( 0 )	echo "git repo found but file is untracked or unchanged" ;;
-    ( 1 )	: "Found a git revision of <$1> that differs"
-    		exec git difftool --no-prompt --extcmd="$gitcmd" -- "$1" ;;
-    ( * )	: "Failed to find a git respository for <$1>" ;;
+    ( 0 )  echo "$self: git repo found but <$1> is unchanged or untracked" ;;
+    ( 1 )  : "Found a git revision of <$1> that differs"
+           exec git difftool --no-prompt --extcmd="$gitcmd" -- "$1" ;;
+    ( * )  : "Failed to find a git respository for <$1>" ;;
   esac
   if [ "$PWD" != "${1%/*}" ]; then cd "$owd"; fi
 }
@@ -78,43 +99,50 @@ git_diff() {
 # Find a potential SyncThing version of FILE
 syncthing_version() {
   : "Seeking a SyncThing version for <$1>"
-  local dir="$1" old
+  local dir="$1" old fn fn_ver ext timestamp
   while dir="${dir%/*}" && [ -d "$dir" ]; do
-    if [ -d "$dir/$stversions" ]; then
-      old="$dir/$stversions/${last#$dir/}"	# trash can versioning
-      if [ -f "$old" ] && [ -s "$old" ]; then break; fi
+    if [ -d "$dir/$syncthing" ]; then
+      old="$dir/$syncthing/${last#$dir/}"	# trash can versioning
+      differ "$old" "$1" && return 0
       fn="${last##*/}"
       fn_ver="$(escape_glob "$fn")"
       ext="${fn_ver##*.}"
-      d='[0-9]'
-      stamp="~20$d$d[01]$d[0-3]$d-[012]$d[0-5]$d[0-6]$d"
+      timestamp="~$ymd-$hms"
       if [ "$ext" != "$fn_ver" ]; then # we have an extension
-        fn_ver="${fn_ver%.$ext}$stamp.$ext"
+        fn_ver="${fn_ver%.$ext}$timestamp.$ext"
       else
-        fn_ver="$fn_ver$stamp"
+        fn_ver="$fn_ver$timestamp"
       fi
-      # BSD find has -print0 and BSD sort has -z but BSD tail LACKS -z :-(
-      old="$(find "$dir/$stversions" -type f -size +0 \
-        -name "$fn_ver" |sort |tail -n1)"
-      # TODO? Loop from newest to oldest and stop on the first DIFFERENT file
-      #       Do this by abstracting the filter for `find` in snapshot_version.
-      break	# for speed & simplicity, assume there are no nested $stversions
+      find_eligible "$1" "$dir/$syncthing" -name "$fn_ver" && return 0
+      break	# for speed & simplicity, assume there are no nested $syncthing
     fi
   done
-  if [ -s "$old" ]; then
-    echo "$old"
-  else
-    return 1
-  fi
+  return 1
 }
 
-# Usage: snapshot_version FILE
+# Usage: find_eligible FILE PATH [PATH...] [FIND_OPTIONS]
+# Report the most recent eligible file in the given PATHs. SUFFIX may be a glob.
+find_eligible() {
+  local file="$1" name or= old
+  shift  # remove the FILE
+
+  # GNU, BSD, and Busybox `find` all support -maxdepth, -mindepth, and -print0
+  # even though they're not in the POSIX standard. Ditto for `xargs -0`.
+  # The awk call makes the list unique without changing the order.
+  # I believe it's `find` that is super slow on ZFS snapshots.
+  find "$@" -type f -size +0 -print0 2>$dn |xargs -0 ls -td |awk '!seen[$0]++' \
+    |while IFS= read -r old; do differ "$old" "$file" && return 0; done \
+    |grep ^	# the `while` loop was in a subshell. this sets the return code.
+}
+
+# Usage: snapshot_version FILE [FIND_OPTIONS]
 # Should support ZFS, NetApps, and more. Only ZFS is tested.
+# Warning, ZFS is slow if there are lots of recent and identical snapshots.
 # Expects a file of the same name as FILE 1-2 levels below the snapshot dir.
 # Auto-senses the ZFS snapshot dir.
 snapshot_version() {
   : "Seeking a snapshot for <$1>"
-  local dir zfs= old= parent="${1%/*}/"
+  local dir zfs= zfsdir= old= parent="${1%/*}/"
   case "$snapshot" in
     ( /* )	dir="$snapshot" ;;
     ( * )	dir="$parent$snapshot" ;;
@@ -124,37 +152,65 @@ snapshot_version() {
     # GNU, BSD, and Busybox all support `df -T`. Busybox lacks `df -t type`.
     zfs=$(df -T "$1" |awk '$2=="zfs" { gsub(/.*%[[:space:]]+\//, "/"); print }')
     dir="$zfs/.zfs/snapshot"
+    zfsdir="$dir/${parent#$zfs/}"
+    zfsdir="${zfsdir%/}"
+    if [ "$zfsdir" = "$dir" ]; then zfsdir=""; fi
   fi
   if [ -d "$dir" ]; then
     : "Seeking newest different snapshot of <${1#$zfs/}> in <$dir>"
-    # GNU, BSD, and Busybox `find` all support -maxdepth, -mindepth, and -print0
-    # even though they're not in the POSIX standard. Ditto for `xargs -0`.
-    find "$dir" ${zfs:+"$dir/${parent#$zfs/}"} -mindepth 1 -maxdepth 2 -type f \
-        -size +0 -name "$(escape_glob "${1##*/}")" -print0 2>/dev/null \
-      |xargs -0 ls -td |awk '!seen[$0]++' \
-      |while IFS= read -r old; do
-        if [ -f "$old" ] && ! diff -q "$1" "$old" >/dev/null; then
-          echo "$old"
-          return 0
-        fi
-      done |grep ^ && return 0	# we were in a subshell. this propagates it.
+    find_eligible "$@" "$dir" ${zfs:+"$zfsdir"} \
+      -name "$(escape_glob "${1##*/}")" -mindepth 1 -maxdepth 2
+    return $?
   fi
   return 1
+}
+
+# Usage: backup_copy FILE [FIND_OPTIONS]
+# Support common backup file names
+backup_copy() {
+  : "Seeking a backup filename for <$1>"
+  local file="$1" base="$(escape_glob "${1##*/}")" ext or=
+  shift
+  set -- "$file" "${file%/*}" -maxdepth 1 "$@" '('
+
+  # Here is the list of suffix patterns we accept. Note the non-suffix later.
+  for ext in '~' .backup .bak .new .old .orig .rej .tmp \
+    ".$ymd" ".$ymd$hms" ".$ymd[-_.]$hms" \
+    '.*[-.]dist' '.*[-.]new' '.*[-.]old' '.*[-.]tmp' '.rpm[nos][era][wgv]*'
+  do
+    set -- "$@" $or -name "$base$ext"
+    or='-o'
+  done
+  # add `#file#` (not just a suffix) and the end-parenthesis
+  set -- "$@" $or -name "#$base#" ')'
+
+  find_eligible "$@"
 }
 
 # Defaults
 self="${0##*/}"
 snapshot="${SNAPSHOT_DIR:-.snapshot}"
-stversions=".stversions"
-vim="exec vim"
+syncthing=".stversions"
+default_vim="vim"
+vim="$default_vim"
 
+# Constants and initializations
+dn='/dev/null'
+d='[0-9]'
+ymd="20$d$d[01]$d[0-3]$d"
+hms="[012]$d[0-5]$d[0-6]$d"
 last=""
 penultimate=""
 reset=0
 opt=1
 skip=0
 full_help=0
+tall=""
 gitcmd="$0 --nofork"
+noop=""
+
+# special case for just -V (if you actually want that, use `-V10`)
+if [ "$*" = -V ]; then version; fi
 
 # Loop through the arguments, find -h/--help, note the last two files (if any).
 # This is a little messy because vim accepts options EVERYWHERE except after --
@@ -164,13 +220,15 @@ for arg in "$@"; do
   if [ "$opt" = 1 ]; then
     if [ "$skip" != 0 ]; then
       case "$skip" in
-        ( stversions )	stversions="$arg" ;;	# SyncThing versions directory
+        ( exec )	vim="$arg" ;;		# alternate vim executable
         ( snapshot )	snapshot="$arg" ;;	# Snapshot directory
+        ( syncthing )	syncthing="$arg" ;;	# SyncThing versions directory
         ( 1 )	escape_squot "$arg"; set -- "$@" "$arg" ;;	# vim option arg
       esac
       skip=0
       continue
     elif [ "$arg" != "${arg#[-+]?}" ]; then
+      push=
       case "$arg" in
         # options with required arguments: cue skipping
         ( --cmd | -[!-]*[tqcSiPrsTuUwW] | -[tqcSiPrsTuUwW] \
@@ -178,16 +236,20 @@ for arg in "$@"; do
         | --servername | --socketid | --startuptime | --windowid ) skip=1 ;;
         # options that we intercept and use locally
         ( -- )			opt=0 ;;
+        ( --exec*=* )		vim="${arg#*=}" ;;
+        ( --exec )		skip=exec ;;
         ( --full-help ) 	full_help=1; help ;;
         ( --help | -[h?]* | -[!-]*[h?]* )	help ;;
-        ( --noop )		vim="echo ${vim#exec }" gitcmd="echo $gitcmd" ;;
+        ( --noop | --test )	noop="echo" gitcmd="echo ${gitcmd#echo }" ;;
         ( --snap*=* )		snapshot="${arg#*=}" ;;
         ( --snap* ) 		skip=snapshot ;;
-        ( --syncthing*=* )	stversions="${arg#*=}" ;;
-        ( --syncthing* )	skip=stversions ;;
+        ( --syncthing*=* )	syncthing="${arg#*=}" ;;
+        ( --syncthing* )	skip=syncthing ;;
         ( --version )		version ;;
+        # other vim options
+        ( * )			push=1 ;;
       esac
-      if [ "$skip" = 1 ]; then
+      if [ "$skip" = 1 ] || [ "$push" = 1 ]; then
         escape_squot "$arg"
         set -- "$@" "$arg"
       fi
@@ -209,26 +271,35 @@ elif [ -z "$penultimate" ]; then
 
   git_diff "$last"	# If there's a git revision to diff, do that and exit
 
+  # we're taking full advantage of vim's ability to take options anywhere
+  # and avoiding the need to inject $penultimate immediately before $last
   if penultimate="$(syncthing_version "$last")"; then
     : "Found a syncthing version of <$last>"
-    # we're taking full advantage of vim's ability to take options anywhere
-    # and avoiding the need to inject $penultimate immediately before $last
     set -- "$penultimate" "$@"
   elif penultimate="$(snapshot_version "$last")"; then
     : "Found a snapshot copy of <$last>"
     set -- "$penultimate" "$@"
+  elif penultimate="$(backup_copy "$last")"; then
+    : "Found a backup copy of <$last>"
+    set -- "$penultimate" "$@"
   else
-    apology='echo "(Could not find a git or snapshot to diff)"'
+    apology='echo "(Could not find a git, snapshot, or backup copy to diff)"'
     set -- "$@" +"vsp|enew|diffthis|$apology"
   fi
+fi
+
+if [ "$vim" != "$default_vim" ]; then
+  : "Running nondefault vim <$vim> rather than guessing GUI"
+  : "Consider using \`-g\` force vim to run the GUI"
+  exec $noop "$vim" -d "$@"
 fi
 
 undef() { echo "Undefined script name '$self', guessing $* vim" >&2; }
 
 case "$self" in
-  ( vimdiff* )	$vim -d "$@" ;;
-  ( *vimdiff* )	$vim -gd "$@" ;;
-  ( [gkwx]* ) 	undef graphical; $vim -gd "$@" ;;
-  ( * ) 	undef console; $vim -d "$@" ;;
+  ( vimdiff* )	exec $noop "$vim" -d "$@" ;;
+  ( *vimdiff* )	exec $noop "$vim" -gd "$@" ;;
+  ( [gkwx]* ) 	undef graphical; exec $noop "$vim" -gd "$@" ;;
+  ( * ) 	undef console; exec $noop "$vim" -d "$@" ;;
 esac
 
