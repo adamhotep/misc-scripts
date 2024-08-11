@@ -1,0 +1,103 @@
+#!/bin/sh
+help() { cat <</help
+Pop up an alert
+Usage: ${0##*/} [OPTIONS] MESSAGE
+  -i, --icon=FILE   Use this icon beside the text
+  -n, --no=TEXT     Use this negative button text instead of "$cancel"
+  -t, --title=TEXT  Use this window title text instead of "$title"
+  -T, --time=TIME   Timeout after TIME (seconds or with units of s, m, or h)
+  -v, --verbose     Also alert to standard output
+  -y, --yes=TEXT    Use this positive button text instead of "$okay"
+
+/help
+  version
+}
+
+version() {
+  echo "Part of misc-scripts:  https://github/adamhotep/misc-scripts"
+  echo "alert 0.7.20240810.0 copyright 2005+ by Adam Katz, GPL v2+"
+  exit
+}
+
+title="${0##*/}"	# the base name of this script
+timeout=31536000	# "disable" timeout by setting it to one year
+okay=Okay
+cancel=Cancel
+icon=
+
+we_have() {
+  command -v "$@" >/dev/null 2>&1
+}
+
+die() {
+  echo "$*" >&2
+  exit 2
+}
+
+needs_arg() {	# WARNING: this hard-codes the $OPT variable
+  if [ -z "$OPTARG" ]; then
+    die "No arg for --$OPT option"
+  fi
+}
+
+while getopts hi:n:t:T:vVy:-: OPT; do
+  if [ "$OPT" = - ]; then
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#$OPT}" OPTARG="${OPTARG#=}"
+  fi
+  case "$OPT" in
+    ( h | help )	help ;;
+    ( i | icon )	needs_arg; icon="$OPTARG" ;;
+    ( n | no | cancel )	needs_arg; cancel="$OPTARG" ;;
+    ( t | title )	title="$OPTARG" ;;
+    ( T | time* )
+      needs_arg
+      case "$OPTARG" in
+        ( *[!0-9]*[0-9smhd] | *[!0-9smhd] ) die "Invalid time '$OPTARG'" ;;
+        ( *[0-9] )	timeout="$OPTARG" ;;
+        ( [0-9]*s )	timeout="${OPTARG%?}" ;;
+        ( [0-9]*m )	timeout="$((${OPTARG%?}*60))" ;;
+        ( [0-9]*h )	timeout="$((${OPTARG%?}*3600))" ;;
+        ( [0-9]*d )	timeout="$((${OPTARG%?}*86400))" ;;
+      esac ;;
+    ( v | verb* )	VERBOSE=1 ;;
+    ( V | ver* )	version ;;
+    ( y | yes | ok* )	needs_arg; okay="$OPTARG" ;;
+  esac
+done
+shift $((OPTIND-1))
+
+TEXT="$*"
+
+[ -z "$DISPLAY" ] && DISPLAY=:0
+export DISPLAY
+
+
+if we_have zenity; then
+  alert() {
+    zenity --question --timeout=$timeout --title="$title" \
+      --ok-label="$okay" --cancel-label="$cancel" --text="$TEXT" \
+      ${icon:+"--icon=$icon"} \
+      >/dev/null 2>&1
+  }
+elif we_have gxmessage || we_have gmessage; then
+  alert() {
+    gxmessage -display $DISPLAY -center -timeout $timeout -title "$title" \
+              -buttons "$okay:1,$cancel:0" -default "$okay" "$TEXT" \
+              >/dev/null 2>&1
+  }
+  if we_have gmessage && ! we_have gxmessage; then
+    gxmessage() { gmessage "$@"; }
+  fi
+else
+  echo "This is just a simple wrapper for zenity or gxmessage or gmessage." >&2
+  echo "You don't have any of those installed, so you don't get a pop-up." >&2
+  echo "" >&2
+  echo "ALERT${1:+: }$*"
+  exit 127
+fi
+
+if [ -n "$VERBOSE" ]; then
+  echo "ALERT${1:+: }$*"
+fi
+
+alert "$@"
