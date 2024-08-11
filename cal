@@ -144,7 +144,7 @@ while getopts 139A:B:Cd:hjm:vVW:y-: OPT; do
     ( h | help )	help ;;  # note, the other -h is somehow just for ncal
     ( j | julian )	push -j ;;
     ( m | month)	abort=abort; push -m "$OPTARG" ;;	# bypass script
-    ( [Vv] | -ver* )	version ;;
+    ( [Vv] | ver* )	version ;;
     ( W | week-min* )	needs_arg; push -W "$OPTARG" ;;
     ( y | year* )	push -y ;;
     ( \? )		die ;; # bad short option (error reported via getopts)
