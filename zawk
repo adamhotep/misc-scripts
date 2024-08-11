@@ -23,8 +23,15 @@ BUG1: If a piped input is EXACTLY 15 bytes, this will awkwardly wait for more.
 BUG2: ASSIGNMENTs cannot be made between reading FILEs. They're all made first.
 BUG3: GNU/gawk's \`nextfile\` and other file-specific extensions won't work.
 
-zawk 0.3.1.20230102 Copyright 2010+ by Adam Katz, Apache License 2.0
 /help
+  version
+}
+
+version() {
+  echo "Wraps awk ($("$AWK" --version 2>/dev/null |grep -m1 '[0-9]' \
+    || echo "'$AWK' does not appear to report its own version"))"
+  echo "Part of misc-scripts:  https://github/adamhotep/misc-scripts"
+  echo "zawk 0.4.20240807.0 Copyright 2010+ by Adam Katz, Apache License 2.0"
   exit
 }
 
@@ -237,7 +244,9 @@ trap 'rm -f $TMP $HEAD $PROGRAM_FILE' 0 1 2 3 4 5 6 9 11 15 18
 # most of these options are from gawk and will cause an error in other awks
 while getopts bcCd:D:e:E:f:F:ghi:l:L:MnNo:Op:PrsStv:VW:-: OPT; do
   case "$OPT$OPTARG" in
-    h|-help* )	help ;;
+    h|[-W]help* ) help ;;
+    [-W]usage )	help |awk '$1 == "Decompress" { exit } 1'; exit ;;
+    [-W]vers* )	version ;;
     -awk=?* )	AWK="${OPTARG#*=}" ;;
     -awk* )	die "option --awk=COMMAND lacks a COMMAND" ;;
     - ) 	break ;;
