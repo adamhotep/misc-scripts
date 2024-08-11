@@ -14,8 +14,8 @@ This is a drop-in replacement for the old psmerge program
 }
 
 version() {
-  echo 'pdfmerge 0.7.20231024.0, Copyright 1999+ by Adam Katz, GPL v2+'
   echo 'Part of misc-scripts: https://github.com/adamhotep/misc-scripts'
+  echo 'pdfmerge 0.7.20240810.0, Copyright 1999+ by Adam Katz, GPL v2+'
   exit
 }
 
