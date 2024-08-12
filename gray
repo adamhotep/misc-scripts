@@ -1,0 +1,53 @@
+#!/bin/sh
+help() {
+  self="${0##*/}"
+  echo "Gray standard output, leaving standard error nice and visible."
+  echo "Usage: $self [-c|--color[=WHEN]] [CAT_OPTIONS] [FILE...]"
+  echo "   or: COMMAND | $self [OPTIONS]"
+  echo ""
+  echo '  -c, --color[=WHEN]  Use colors. As `-c` or `--color`, WHEN=`always`'
+  echo '                      WHEN may be `always`, `auto` (default) or `never`'
+  echo ""
+  version
+}
+
+version() {
+  echo "Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
+  echo "gray 2.0.20240519.0 Copyright 2003+ by Adam Katz, GPL v2+"
+  exit
+}
+
+if [ -n "$NO_COLOR" ]; then
+  color=never
+elif [ -n "$CLICOLOR_FORCE" ]; then
+  color=always
+else
+  color=auto
+fi
+
+case "$1" in
+  ( -h | --help )		help ;;
+  ( --col*r=?* )		color="${1#*=}"; shift ;;
+  ( -c | -color | --colo* )	color=always; shift ;;
+  ( -c?* )			color="${1#c}"; shift ;;
+  ( -V | --version )		version ;;
+esac
+
+# disabled colors or auto and not a TTY
+if [ "$color" != "${color#[n0]}" ] \
+|| [ "${color#auto}" != "${color#[Tt][Tt][Yy]}" -a ! -t 1 ]; then
+  exec cat "$@"
+fi
+
+if [ "$#" -gt 0 ]; then
+  # Arguments were given. Files, hopefully. Parse with `cat` and re-run `gray`
+  cat "$@" |exec "$0"
+else
+  # for every line, print the output with gray SGR codes, resetting at the end
+  while IFS= read -r line; do
+    printf '\033[1;30m%s\033[m\n' "$line"
+  done
+fi
+
+# test with this call from bash:
+# (echo stdout;sleep 1;echo stderr>&2;sleep 1;echo stdout)|gray
