@@ -1,0 +1,199 @@
+#!/usr/bin/perl
+# This script is released under the GNU GPL 2+, copyright (c) 2005+ by Adam Katz
+# see timecalc_help function below for description
+use strict;
+use warnings;
+
+my $tcPROGRAM = "timecalc";
+my $tcVERSION = "0.6.20240811.0";
+sub timecalc_usage { return "Usage: $tcPROGRAM [OPTIONS] [TIME|SECONDS]"; }
+
+my $min = 60; my $hour = 60*$min; my $day = 24*$hour; my $year = 365*$day;
+
+sub timecalc_help {
+  print "Convert time between colon-delimited units and numbers of seconds.\n";
+  print timecalc_usage();
+  print '
+  TIME     Colon-separated time including seconds or a specified smallest unit
+           Format is Y:D:H:M:S, 365.0 days/year (ignores leap years)
+  SECONDS  A number of seconds
+  <STDIN>  The first line of standard input is used if no other input is given
+  OPTIONS
+    --time    Output colon-delimited time regardless of input
+    --seconds Output time in seconds regardless of input
+  Units indicate smallest value; 3h & 3:00m & 3:00:00 will all return 10800
+
+Returns: opposite of argument (TIME->SECONDS, SECONDS->TIME)
+Valid Range:  0-2147483647 or 0-68:35:03:14:07 (assuming 32bit limit)
+64bit Max:  9223372036854775807 or 292471208677:195:15:30:07 (9.22Es, 292Gy)';
+  print "\n\n";
+  timecalc_version();
+  # timecalc 0.2 was written in /bin/sh ... in less code, though this is faster
+  exit 0;
+}
+
+sub timecalc_version {
+  print "Part of misc-scripts: https://github.com/adamhotep/misc-scripts\n";
+  print "$tcPROGRAM $tcVERSION, Copyright 2005+ by Adam Katz, GPLv2+\n";
+  exit 0;
+}
+
+# Tests {{{
+
+# test_timecalc: string|number number|string -> boolean
+# takes in an argument for timecalc and reports if its result was the other arg
+sub test_timecalc {
+  my ($value, $answer, $option) = @_;
+  my $result = timecalc($value, $option // "");
+  if ($result =~ /^$answer$/) { return 1; }
+  print STDERR "Test of $value failed. Computed $result, should be $answer.\n";
+  return 0;
+}
+
+# timecalc_testsuite: VOID -> VOID
+# Test suite for timecalc, prints tests that failed or reports that none failed
+sub timecalc_testsuite {
+  # multiply to prevent short-circuit (which would only show first failure)
+  if ( test_timecalc(5, "0:05")
+     * test_timecalc("0:66", 66)
+     * test_timecalc("67s", "1:07")
+     * test_timecalc("1:30", 90)
+     * test_timecalc("2h", 7200)
+     * test_timecalc("3d", 259200)
+     * test_timecalc(1440, "24:00")
+     * test_timecalc("3:00:89", 10889)
+     * test_timecalc("-1:4:93", "-" . timecalc("1:4:93"))
+     * test_timecalc(-126410465, "-4:3:02:01:05")
+     * test_timecalc("65.5h", "235800")
+     * test_timecalc("65:30m", "235800")
+     * test_timecalc("5595", "5595", "-s")
+     * test_timecalc("55:95", "56:35", "-t")
+     * test_timecalc("55:95m", "2:08:35:00", "-t")
+     * test_timecalc("5595", "1:33:15", "--time")
+     * test_timecalc("18305.5", "5:05:05.5")
+  ) { print "All tests completed successfully.\n"; exit 0; }
+  else { print "At least one test failed.\n"; exit 1; }
+}
+
+# end tests }}}
+
+# timecalc_err: string -> VOID
+# report that string is bad, suggest help
+sub timecalc_err {
+  print STDERR "$tcPROGRAM: `@_' is neither a time nor a number of seconds.\n";
+  print STDERR timecalc_usage();
+  print STDERR "Try `$tcPROGRAM --help' for more information.\n";
+}
+
+
+sub timecalc_units {
+  my ($time, $multiplier) = @_;
+  my $unit = $time; $unit =~ s/^.*(.$)/$1/;
+  $time =~ s/^(.*).$/$1/;
+
+  # switch on unit
+    ($unit =~ /y/i) ? $multiplier = $year
+  : ($unit =~ /w/i) ? $multiplier = ($day*7)  # buggy easter-egg
+  : ($unit =~ /d/i) ? $multiplier = $day
+  : ($unit =~ /h/i) ? $multiplier = $hour
+  : ($unit =~ /m/i) ? $multiplier = $min
+  : ($unit =~ /s/i) ? 1  # default is seconds, no need for multiplier
+  : print STDERR "ignoring unknown unit `$unit'\n";
+  return ($time, $multiplier);
+}
+
+sub time2sec {
+  my ($time, $multiplier) = @_;
+  my $temp = $time;
+  $time = 0;
+  foreach my $field (1, $min, $hour, $day, $year) {
+    if ($multiplier > $field) { next; } # skip units below the one specified
+    $_ = $temp;
+    s/.*?([^:]+)$/$1/;
+    $temp =~ s/^(.*?):?[^:]+$/$1/;
+    if ($_ =~ /./) { $time = $time + ($field * $_); }
+  }
+  print STDERR "Ignored fields larger than years, $temp\n" if $temp =~ /./;
+  return $time;
+}
+
+sub sec2time {
+  my ($time, $multiplier) = @_;
+  $time = $time * $multiplier;	# use specified units
+  my ($years, $days, $hours, $mins, $secs);
+  $time -= $year * ($years = int ($time/$year));
+  $time -= $day  * ($days  = int ($time/$day));
+  $time -= $hour * ($hours = int ($time/$hour));
+  $time -= $min  * ($mins  = int ($time/$min));
+  $time = sprintf("%d:%d:%02d:%02d:%06.3f",
+    $years, $days, $hours, $mins, $time);
+  $time =~ s/^[0:]*(.+:.+?)\.?0*$/$1/;	# remove lead zeros, tail zeros
+  return $time;
+}
+
+# timecalc: string|number [-t|--time|-s|--seconds] -> number|string
+# Convert a colon-separated time to its value in seconds or vice-versa, units ok
+sub timecalc {
+  my $OUTPUT = "";
+  my $time = shift;
+  my $option = shift // "";
+
+  # Accept -t/--time and -s/--seconds to force the output
+  if ($option =~ /^-+t([^e]|$)/) { $OUTPUT = "time"; }
+  elsif ($option =~ /^-+s/)   { $OUTPUT = "seconds"; }
+
+  # use the first line of input if no data was passed from the command line
+  if ($time eq "") { $time = <STDIN>; }
+
+  my $multiplier = 1;  # units/second, default unit is seconds
+  my $neg = "";
+
+  # negative values are noted, removed, and prepended to end result
+  if ($time =~ /^-[0-9]/) { $neg="-"; $time =~ s/^-(.*)$/$1/; }
+
+  # only operate on valid input
+  if ($time =~ /^[0-9:.]+[ywdhms]?$/i) {
+
+    # UNITS
+    if ($time =~ /[a-zA-Z]$/) {
+      ($time, $multiplier) = timecalc_units($time, $multiplier);
+    }
+
+    # TIME -> SECONDS
+    if ($multiplier > 1 || $time =~ /:/) {
+      $time = time2sec($time, $multiplier);
+      $time = sec2time($time, 1) if $OUTPUT =~ /time/;  # --time forced
+    }
+
+    # SECONDS -> TIME
+    elsif ($time =~ /^[0-9.]*$/) {
+      $time = sec2time($time, $multiplier);
+      $time = time2sec($time, 1) if $OUTPUT =~ /seconds/;  # --seconds forced
+    }
+
+  }
+  # INVALID INPUT
+  else { timecalc_err($time); exit 1; }
+
+  return "$neg$time";
+}
+
+
+##################################
+# the above could be a library if we rip out the following
+# and put it in a script with a Require line referencing the library
+
+use Getopt::Long qw(:config no_ignore_case bundling);
+my %opt = ();
+GetOptions(\%opt, qw/ help|h version|ver|V|v seconds|s test time|t /);
+if ($opt{help}) 	{ timecalc_help();	exit 0; }
+if ($opt{version})	{ timecalc_version();	exit 0; }
+
+if ($opt{seconds})	{ $opt{out} = "seconds"; }
+if ($opt{time}) 	{ $opt{out} = "time"; }
+if ($opt{test}) 	{ timecalc_testsuite();	exit 0; }
+
+$tcPROGRAM = $0 =~ s/.*\///r;
+for (@ARGV) {
+  print timecalc($_) . "\n";
+}

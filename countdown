@@ -1,0 +1,66 @@
+#!/bin/sh
+help() {
+  echo 'Like `sleep` but counts down visually when interactive and unpiped'
+  echo "Usage: ${0##*/} [-i|--interactive] [MESSAGE] TIME"
+  echo ""
+  echo "  -i, --interactive  Force interactivity rather than determining it"
+  echo ""
+  version
+}
+
+version() {
+  echo "Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
+  echo "countdown 0.3.20240811.0 Copyright 2003+ by Adam Katz, GPL v2+"
+  exit
+}
+
+case $1 in
+  ( -h | --help )		help ;;
+  ( -i | --interactive )	interactive=1; shift ;;
+  ( -v | --version )		version ;;
+esac
+
+# (unpiped, interactive, and neither linux console nor a dumb terminal) or -i
+if [ -t 1 ] && [ -z "${-##*i*}" ] && [ "${TERM%inux}" = "${TERM%dumb}" ] \
+|| [ -n "$interactive" ]; then
+  titlebar() {
+    printf '\033]0;%s\033\\%s' "$*" ''
+  }
+  sec2time() {
+    local d= h= m= s="$1" o= neg= u=
+    # The $((...)) construct is truncates to integers, which is perfect here.
+    if [ $1 -ge 86400 ]; then d=$((s/86400)); o="%dd "; s=$((s-d*86400)); fi
+    if [ $1 -ge 3600 ]; then h=$((s/3600)); o="$o%d:"; s=$((s-h*3600)); fi
+    if [ $1 -ge 60 ]; then m=$((s/60)); o="$o%02d:%02d"; s=$((s-m*60)); fi
+    if [ $1 -lt 60 ]; then u=s; fi
+    printf "%s${o:-%d}%s\n" "$neg" $d $h $m $s $u
+  }
+  countdown() {
+    local t="$2" text='\r%s, waiting %-5s'
+    titlebar "$1"
+    while [ "$t" -gt 0 ]; do
+      printf "$text" "$1" "$(sec2time $t)"
+      t=$((t-1))
+      sleep 1
+    done
+    printf "$text" "$1" "...  "
+  }
+else
+  countdown() { echo "$1"; sleep "$2"; }
+fi
+
+if [ $# = 1 ]; then set -- "Counting down from $1" "$1"; fi
+
+if ! [ "$2" -ge 0 ] 2>/dev/null; then
+  t="$2"
+  if command -v timecalc >/dev/null 2>&1; then
+    set -- "$1" "$(timecalc "$t" 2>/dev/null)"
+  fi
+  if ! [ "$2" -ge 0 ] 2>/dev/null; then
+    echo "Invalid time '$t'" >&2
+    exit 2
+  fi
+fi
+
+countdown "$@"
+
