@@ -21,8 +21,8 @@ usage() {
 }
 
 version() {
-  echo 'grepe 1.0.20200124, Copyright 2010+ by Adam Katz, GPL v2+'
-  echo 'Part of misc-scripts:  https://github.com/adamhotep/misc-scripts'
+  echo 'Part of misc-scripts: https://github.com/adamhotep/misc-scripts'
+  echo 'grepe 1.0.20200124.1, Copyright 2010+ by Adam Katz, GPL v2+'
   exit
 }
 

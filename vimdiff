@@ -36,8 +36,8 @@ symlink named gvimdiff that points to it (if you have gvim installed).
 
 version() { cat <</version
 Wraps $(vim_version "vim (version unknown, '$vim --help' failed)")
-Part of misc-scripts:  https://github/adamhotep/misc-scripts
-vimdiff-auto 2.2.20240810.0 copyright 2009+ by Adam Katz, GPLv3
+Part of misc-scripts: https://github/adamhotep/misc-scripts
+vimdiff-auto 2.2.20240810.1 copyright 2009+ by Adam Katz, GPLv3
 /version
   exit
 }

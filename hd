@@ -28,8 +28,8 @@ version() {
   printf %s "Using "
   hexdump --version 2>/dev/null || man hexdump 2>/dev/null |awk '
     END { sub(/   +.*/, ""); if (NR) print "hexdump from", $0 }'
-  echo "Part of misc-scripts:  https://github/adamhotep/misc-scripts"
-  echo "hd-wrapper 2.0.20240721.1 Copyright 2005+ by Adam Katz," \
+  echo "Part of misc-scripts: https://github/adamhotep/misc-scripts"
+  echo "hd-wrapper 2.0.20240721.2 Copyright 2005+ by Adam Katz," \
        "GPLv3+ / BSD 2-clause"
   exit
 }

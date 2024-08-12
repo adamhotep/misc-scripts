@@ -21,8 +21,8 @@ B<ls.swp> [OPTIONS] [SWAP_FILE...]
  -h      Suppress showing of swap file names
  -v      Verbose (implies -H)
 
-ls.swp 0.3.20210516 Copyright 2017+ by Adam Katz, GPL v2+
-Part of misc-scripts:  https://github.com/adamhotep/misc-scripts
+Part of misc-scripts: https://github.com/adamhotep/misc-scripts
+ls.swp 0.3.20210516.1 Copyright 2017+ by Adam Katz, GPL v2+
 
 =cut
 # further documentation lives at the end of this file
