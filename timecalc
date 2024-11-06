@@ -131,7 +131,7 @@ sub sec2time {
   return $time;
 }
 
-# timecalc: string|number [-t|--time|-s|--seconds] -> number|string
+# timecalc: string|number [time|seconds] -> number|string
 # Convert a colon-separated time to its value in seconds or vice-versa, units ok
 sub timecalc {
   my $OUTPUT = "";
@@ -139,8 +139,9 @@ sub timecalc {
   my $option = shift // "";
 
   # Accept -t/--time and -s/--seconds to force the output
-  if ($option =~ /^-+t([^e]|$)/) { $OUTPUT = "time"; }
-  elsif ($option =~ /^-+s/)   { $OUTPUT = "seconds"; }
+  if ($option eq "time")	{ $OUTPUT = "time"; }
+  elsif ($option eq "seconds")	{ $OUTPUT = "seconds"; }
+  elsif ($option ne "") 	{ die "invalid option $option\n"; }
 
   # use the first line of input if no data was passed from the command line
   if ($time eq "") { $time = <STDIN>; }
@@ -185,15 +186,16 @@ sub timecalc {
 
 use Getopt::Long qw(:config no_ignore_case bundling);
 my %opt = ();
+my $o = "";
 GetOptions(\%opt, qw/ help|h version|ver|V|v seconds|s test time|t /);
 if ($opt{help}) 	{ timecalc_help();	exit 0; }
 if ($opt{version})	{ timecalc_version();	exit 0; }
 
-if ($opt{seconds})	{ $opt{out} = "seconds"; }
-if ($opt{time}) 	{ $opt{out} = "time"; }
+if ($opt{seconds})	{ $o = "seconds"; }
+if ($opt{time}) 	{ $o = "time"; }
 if ($opt{test}) 	{ timecalc_testsuite();	exit 0; }
 
 $tcPROGRAM = $0 =~ s/.*\///r;
 for (@ARGV) {
-  print timecalc($_) . "\n";
+  print timecalc($_, $o) . "\n";
 }
