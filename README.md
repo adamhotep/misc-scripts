@@ -25,8 +25,14 @@ Alert by beeping or flashing the console
 ## cal
 A smarter `cal` wrapper that can handle month names, 9mo view, and nearest month. Try `cal -9`.
 
+## countdown
+Like `sleep` but counts down visually when interactive and unpiped.
+
 ## diffc
 Colored diff, uses `git diff --patience` if available.
+
+## gray
+Gray standard output, leaving standard error nice and visible.
 
 ## grepe
 A smarter multi-pattern `grep` wrapper.
@@ -48,6 +54,9 @@ Demonstration of various [Select Graphic Rendition](https://en.wikipedia.org/wik
 
 ## sortn
 Title-aware `sort` wrapper that displays title line(s) before sorted content.
+
+## timecalc
+Convert time between colon-delimited units and numbers of seconds.
 
 ## trunc
 Truncate input to current terminal width (or specify a different width).
