@@ -1,0 +1,125 @@
+#!/bin/bash
+help() { cat <</help
+Convert a number to any radix (arithmetic base) between 2 and 64 (inclusive)
+Usage: $self [-][INPUT_RADIX#]NUMBER [OUTPUT_RADIX]
+       $self md5[:STRING] [OUTPUT_RADIX]
+
+-               The negative sign goes *before* the INPUT_RADIX, not after
+INPUT_RADIX     The input radix is any integer between 2 and 64 (default = 10)
+NUMBER          Any integer. Digits run 0-9 then a-z then A-Z then @ then _
+                Must be 64-bit (-$max to $max)
+OUTPUT_RADIX    The output radix is any integer between 2 and 64
+                If INPUT_RADIX is 10, default = 36. Otherwise default = 10.
+md5             Use a truncated MD5 checksum of STRING (or else standard input)
+STRING          A string to checksum. No trailing linebreak is added.
+
+Examples:
+  $self 123               # \`ya\` (defaults to input/output radices of 10/36)
+  $self -805854694382 32  # \`-negative\`
+  $self -32\\#negative     # \`-805854694382\` (defaults to output radix 10)
+  $self "64#1F_@rS" 36    # \`testme\`
+  $self "md5:hey Joe" 64  # \`6ZGm5WN3VNv\` (THIS IS NOT A PASSWORD GENERATOR!)
+
+/help
+  version
+}
+
+version() {
+  echo "radix v0.1.20241112.0 copyright 2024+ by Adam Katz, GPL v3+"
+  echo "Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
+  exit
+}
+
+we_have() { command -v "$@" >/dev/null; }	# true if the command exists
+
+die() { echo "$self: $*" >&2; exit 2; } 	# report error and exit
+
+isNaN() { ! [ "${1#-}" -le $max ] 2>/dev/null; }	# cannot use [[ ... ]]
+
+vet_radix() {
+  r="radix (arithmetic base) \`$1\`"
+  if isNaN "$1"; then
+    die "Invalid number for $r"
+  elif (( 2 > $1 || $1 > 64 )); then
+    die "Out of bounds $r is not 2-64"
+  fi
+}
+
+if [[ $1 == -- ]]; then shift; fi
+
+self="${0##*/}"
+iradix=10 	# input radix (updated later if specified in the number)
+number="$1"	# input number, which may specify an input radix
+oradix="$2"	# output radix
+digits="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ@_"
+# -9223372036854775808 is 64-bit, but it had issues, so it is forbidden
+max=9223372036854775807
+out_of_bounds="Number must be between -$max and $max"
+
+case $number in
+  ( -h* | --help* | help )	help ;;
+  ( -v* | -V | ver | version )	version ;;
+  ( md5* )
+    if ! we_have md5sum; then
+      if we_have busybox && busybox |grep -Fwq md5sum; then
+        md5sum() { busybox md5sum "$@"; }
+      elif we_have md5; then
+        md5sum() { md5 "$@"; }
+      else
+        die "Cannot locate md5 checksummer"
+      fi
+    fi
+    case $number in
+      ( md5 )	number="$(cat |md5sum)" ;;
+      ( md5:* )	number="$(printf %s "${number#md5:}" |md5sum)" ;;
+      ( * )	die 'MD5 must be invoked as either `md5` or `md5:STRING`' ;;
+    esac
+    tmp="${number#????????????????}"
+    number="16#${number%$tmp}"
+    ;;
+esac
+
+if isNaN "$number"; then
+  : "NUMBER is not an integer. Determine its safety then convert to an integer"
+  if [[ $number != *\#* ]]; then
+    if [[ ${number#-} != *[^0-9]* ]]; then
+      die "$out_of_bounds"
+    else
+      die "Invalid number \`$1\` (no input radix specified? see \`--help\`)"
+    fi
+  fi
+  abs="${number#-}"
+  iradix="${abs%%#*}"
+  vet_radix "$iradix"
+  case ${abs#$iradix#} in
+    ( '' | *[!0-9a-zA-Z@_]* )	die "Invalid number \`$number\`" ;;
+  esac
+  (( number += 0 )) || exit 2	# convert to an integer or exit after bash error
+  : "number converted from <$1> to <$number>"
+fi
+
+case $iradix:$oradix in
+  ( 10: )	oradix=36 ;;
+  ( *: )	oradix=10 ;;
+esac
+
+vet_radix "$oradix"
+
+if (( number < 0 )); then
+  sign='-'
+  number="${number#-}"
+else
+  sign=''
+fi
+
+if isNaN "$number"; then
+  die "$out_of_bounds"
+fi
+
+out=""
+while (( number != 0 )); do
+  out="${digits:(( number % oradix )):1}${out}"
+  (( number /= oradix ))
+done
+
+echo "$sign${out:-$number}"

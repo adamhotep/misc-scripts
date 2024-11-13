@@ -49,6 +49,9 @@ Show notes on vim swap files.
 ## pdfmerge
 Merge PDFs
 
+## radix
+Convert numbers from one radix (arithmetic base) to another or generate a code from a truncated MD5 checksum.
+
 ## sgr
 Demonstration of various [Select Graphic Rendition](https://en.wikipedia.org/wiki/ANSI_Select_Graphic_Rendition) parameters (ANSI SGR colors+)
 
