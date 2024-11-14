@@ -9,7 +9,7 @@ help() {
 Drop-in replacement for [g]vimdiff.
 Given one file, compares to git, SyncThing, snapshots, or else backup names.
 
-${usage:-Usage: $self [arguments] [file ...]}
+${usage:-Usage: vimdiff [arguments] [file ...]}
 
 Arguments recognized by vimdiff-auto wrapper (@adamhotep misc-scripts):
    --full-help          Include vim command-line help$([ -n "$tall" ] && echo "
@@ -37,7 +37,7 @@ symlink named gvimdiff that points to it (if you have gvim installed).
 version() { cat <</version
 Wraps $(vim_version "vim (version unknown, '$vim --help' failed)")
 Part of misc-scripts: https://github/adamhotep/misc-scripts
-vimdiff-auto 2.2.20241025.0 copyright 2009+ by Adam Katz, GPLv3
+vimdiff-auto 2.2.20241020.0 copyright 2009+ by Adam Katz, GPLv3
 /version
   exit
 }
