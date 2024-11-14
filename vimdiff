@@ -9,7 +9,7 @@ help() {
 Drop-in replacement for [g]vimdiff.
 Given one file, compares to git, SyncThing, snapshots, or else backup names.
 
-${usage:-Usage: vimdiff [arguments] [file ...]}
+${usage:-Usage: $self [arguments] [file ...]}
 
 Arguments recognized by vimdiff-auto wrapper (@adamhotep misc-scripts):
    --full-help          Include vim command-line help$([ -n "$tall" ] && echo "
@@ -37,7 +37,7 @@ symlink named gvimdiff that points to it (if you have gvim installed).
 version() { cat <</version
 Wraps $(vim_version "vim (version unknown, '$vim --help' failed)")
 Part of misc-scripts: https://github/adamhotep/misc-scripts
-vimdiff-auto 2.2.20240810.1 copyright 2009+ by Adam Katz, GPLv3
+vimdiff-auto 2.2.20241025.0 copyright 2009+ by Adam Katz, GPLv3
 /version
   exit
 }
@@ -136,7 +136,7 @@ find_eligible() {
 }
 
 # Usage: snapshot_version FILE [FIND_OPTIONS]
-# Should support ZFS, NetApps, and more. Only ZFS is tested.
+# Should support ZFS, NetApps, Infinidat, etc. Only ZFS & Infinidat are tested.
 # Warning, ZFS is slow if there are lots of recent and identical snapshots.
 # Expects a file of the same name as FILE 1-2 levels below the snapshot dir.
 # Auto-senses the ZFS snapshot dir.
@@ -206,6 +206,7 @@ opt=1
 skip=0
 full_help=0
 tall=""
+split=vsp
 gitcmd="$0 --nofork"
 noop=""
 
@@ -247,6 +248,7 @@ for arg in "$@"; do
         ( --syncthing* )	skip=syncthing ;;
         ( --version )		version ;;
         # other vim options
+        ( -o* ) 		push=1 split=sp ;;	# horizontal split
         ( * )			push=1 ;;
       esac
       if [ "$skip" = 1 ] || [ "$push" = 1 ]; then
@@ -263,7 +265,7 @@ done
 
 # no file arguments: open a diff between two new files
 if [ ! -e "$last" ]; then
-  set -- "$@" +'vsp|enew|diffthis'
+  set -- "$@" +"$split|enew|diffthis"
 
 # Just one file
 elif [ -z "$penultimate" ]; then
