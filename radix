@@ -25,7 +25,7 @@ Examples:
 }
 
 version() {
-  echo "radix v0.1.20241112.0 copyright 2024+ by Adam Katz, GPL v3+"
+  echo "radix 0.1.20241116.0 copyright 2024+ by Adam Katz, GPL v3+"
   echo "Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
   exit
 }
@@ -94,7 +94,8 @@ if isNaN "$number"; then
   case ${abs#$iradix#} in
     ( '' | *[!0-9a-zA-Z@_]* )	die "Invalid number \`$number\`" ;;
   esac
-  (( number += 0 )) || exit 2	# convert to an integer or exit after bash error
+  : "convert \`$number\` to an integer or else exit after bash arithmetic error"
+  (( number += 0 || number == 0)) || exit 2
   : "number converted from <$1> to <$number>"
 fi
 
