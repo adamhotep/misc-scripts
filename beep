@@ -1,7 +1,7 @@
 #!/bin/sh
 summary="Alert by beeping or flashing the console"
-version="beep 0.3.20240519.0 Copyright 2000+ by Adam Katz, GPL v2+"
 website="Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
+version="beep 0.3.20240519.0 Copyright 2000+ by Adam Katz, GPL v2+"
 # Run --help to learn more
 
 # sameas(): True when this program ($0) is the same as the argument ($1) {{{

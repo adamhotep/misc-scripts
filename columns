@@ -35,8 +35,8 @@ sub help {
 }
 
 sub version {
-  print "columns 0.5.20240602.1 Copyright 2010+ by Adam Kat, GPL v2+\n";
   print "Part of misc-scripts: https://github.com/adamhotep/misc-scripts\n";
+  print "columns 0.5.20240602.1 Copyright 2010+ by Adam Kat, GPL v2+\n";
 }
 
 my @lengths;

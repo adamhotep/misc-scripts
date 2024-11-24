@@ -18,8 +18,8 @@ version
 }
 
 version() {
-echo "${CG}diffc$C0 v1.1.0.20190828 Copyright 2010+ by Adam Katz, GPL v2+"
 echo "Part of misc-scripts:  ${CB}https://github.com/adamhotep/misc-scripts$C0"
+echo "${CG}diffc$C0 v1.1.0.20190828 Copyright 2010+ by Adam Katz, GPL v2+"
 }
 
 # True when we have all given commands. No output.
