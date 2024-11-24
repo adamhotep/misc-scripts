@@ -25,8 +25,8 @@ Examples:
 }
 
 version() {
-  echo "radix 0.1.20241116.1 copyright 2024+ by Adam Katz, GPL v3+"
   echo "Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
+  echo "radix 0.1.20241124.0 copyright 2024+ by Adam Katz, GPL v3+"
   exit
 }
 
@@ -45,9 +45,15 @@ vet_radix() {
   fi
 }
 
-if [[ $1 == -- ]]; then shift; fi
-
 self="${0##*/}"
+
+if [[ $1 == -- ]]; then
+  shift
+elif [[ $# == 0 ]]; then
+  help |grep -A1 ^Usage
+  exit
+fi
+
 iradix=10 	# input radix (updated later if specified in the number)
 number="$1"	# input number, which may specify an input radix
 oradix="$2"	# output radix
