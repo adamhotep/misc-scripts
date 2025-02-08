@@ -18,7 +18,7 @@ help() {
 
 version() {
   echo "A part of misc-scripts, https://github.com/adamhotep/misc-scripts"
-  echo "sgr 1.0.20240806.0 copyright 2000+ by Adam Katz, GPLv2+"
+  echo "sgr 1.0.20241214.0 copyright 2000+ by Adam Katz, GPLv2+"
   exit
 }
 
@@ -63,6 +63,13 @@ while getopts AaBbCcFfhIinwvVW: OPT; do
 done
 shift $((OPTIND-1))
 
+#####
+# auto-detect display affordances and fit to them
+
+isNaN() { ! [ "$1" -gt 0 ] 2>/dev/null; }
+if isNaN "$COLUMNS";	then COLUMNS="$(tput cols )"; fi
+if isNaN "$LINES";	then   LINES="$(tput lines)"; fi
+
 if [ "$COLUMNS" -ge 160 ]
   then n160=""
   else n160="$n"
@@ -75,14 +82,6 @@ if [ "$help" = 1 ]; then
 elif [ "$version" = 1 ]; then
   version
 fi
-
-#####
-# auto-detect display affordances and fit to them
-
-isNaN() { ! [ "$1" -gt 0 ] 2>/dev/null; }
-if isNaN "$COLUMNS";	then COLUMNS="$(tput cols )"; fi
-if isNaN "$LINES";	then   LINES="$(tput lines)"; fi
-
 if [ "$narrow" = 1 ]
   then width=3
   else width=6
@@ -95,7 +94,7 @@ fits() {
     ( 19 + ${2:-0} + BLINK*3 + CANCEL*12 + FONT*11 + IDEO*5 + CANCEL*IDEO ) ))
   avail=$(( COLUMNS - TOT ))
   #echo "cols=$COLUMNS tot=$tot avail=$avail" >&2
-  [ $avail -GE 0 ]	# this is the return value
+  [ $avail -ge 0 ]	# this is the return value
 }
 
 if fits $width 9; then
@@ -104,8 +103,6 @@ elif fits $width 0; then	# standard case
   if [ "$narrow" = 2 ]; then narrow=0; fi
 elif [ "$LINES" -gt 30 ] && fits 3 9; then
   all=2
-  narrow=1
-elif [ "$narrow" = 2 ]; then
   narrow=1
 fi
 
@@ -121,7 +118,7 @@ printf "%s$n%s$n160%s$n" \
   "Use as $use_as where \\e is $esc (escape char, $key) or \\033 or \\x1b " \
   "and $e[7mcode$e[m is any semicolon-delimited code(s) below, e.g. \`\\e[3;45mHI\\e[0m\` is $e[3;45mHI$e[m." \
 
-if [ $narrow = 1 ]; then
+if [ $narrow -gt 0 ]; then
   printf "$n%s$n160%s$n$n" \
     'Column one is stand-alone, e.g. `\e[1m` while others combine with it, ' \
     'so row 1 col 2 is `\e[1;1m` and row 31 col 4 is `\e[31;3m`'
@@ -137,7 +134,7 @@ for c1 in {0..65}; do	# ROWS
     ( 6[0-4] )			if [ "$ideo"   =  0 ]; then continue; fi ;;
     ( 65 )		if [ "$ideo$cancel"   != 11 ]; then continue; fi ;;
   esac
-  if [ "$narrow" = 1 ]
+  if [ "$narrow" -gt 0 ]
     then out=";"
     else out=""
   fi
@@ -152,7 +149,7 @@ for c1 in {0..65}; do	# ROWS
       ( 6[0-4] )		if [ "$ideo"   =  0 ]; then continue; fi ;;
       ( 65 )		if [ "$ideo$cancel"   != 11 ]; then continue; fi ;;
     esac
-    if [ "$narrow" != 1 ]
+    if [ "$narrow" = 0 ]
       then out="$(printf %5s "$c1;$c2")"
       else out="$(printf %2s "$c2")"
     fi
