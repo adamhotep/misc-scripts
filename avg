@@ -42,7 +42,7 @@ my $key = 1;
 if (-t 0 and "-h" eq join(" ", @ARGV)) { do_help; exit 0; }
 
 GetOptions("a|add|sum"=>\$do_sum, "b|bourne|shell"=>\$do_shell,
-  "c|comments"=>\$skip_comments, "d|delimeter=s"=>\$delim,
+  "c|comments"=>\$skip_comments, "d|delimiter=s"=>\$delim,
   "g|geometric-mean|geometricmean|geomean|geommean"=>\$do_geo,
   "h|harmean|harmmean"=>\$do_harm, "help"=>\$help, "k|key|field=i"=>\$key,
   "m|median"=>\$do_median, "M|mode"=>\$do_mode, "n|newline|line"=>\$do_line,
@@ -62,7 +62,8 @@ $do_geo = $do_harm = $do_max = $do_median = $do_mode = $do_sum = $do_stdev = 1
 
 $do_stdev = 1 if $plus or $minus;
 
-my $reciprocal_sum = my $sum = my $count = my $max = my $min = 0;
+my $reciprocal_sum = my $sum = my $count = 0;
+my $max = my $min = undef;
 my $product = 1;
 my @input = my %seen = ();
 
@@ -71,9 +72,8 @@ while (<>) {
   next unless /^\s*(?:\S+\s+){$key}(-?\d+(?:\.\d+)?|\.\d+)(?:\D.*)?$/;
   my $n = 0 + $1; # force storing it as a number
   if ($do_max) {
-    $min = $max = $n if $count == 1;
-    if ($n < $min) { $min = $n; }
-    elsif ($n > $max) { $max = $n; }
+    $min = $n if !defined($min) or $n < $min;
+    $max = $n if !defined($max) or $n > $max;
   }
   $sum += $n;
   $reciprocal_sum += 1/$n if $do_harm and $n != 0;
