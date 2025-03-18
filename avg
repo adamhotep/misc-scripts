@@ -67,7 +67,7 @@ my $product = 1;
 my @input = my %seen = ();
 
 while (<>) {
-  next if $skip_comments and /^\s*(?:\S+\s+){0,$key}?#/;
+  next if $skip_comments and /^\s*(?:\S+\s+){0,$key}#/;
   next unless /^\s*(?:\S+\s+){$key}(?:.*?)(-?\d+(?:\.\d+)?|\.\d+)(?:.*?)\s*$/;
   my $n = 0 + $1; # force storing it as a number
   if ($do_max) {
