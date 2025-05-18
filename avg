@@ -29,7 +29,7 @@ Usage: avg [OPTIONS] [FILE...]
 Example:  grep -w ADVANCE_FEE_2 spam.log |avg -k2
 end_help
   print "Part of misc-scripts: https://github/adamhotep/misc-scripts\n";
-  print "avg 0.8.20210802.1 Copyright 2005+ by Adam Katz, GPL v2+\n";
+  print "avg 0.8.20250518.0 Copyright 2005+ by Adam Katz, GPL v2+\n";
 }
 
 my $delim = '';
@@ -68,7 +68,7 @@ my $product = 1;
 my @input = my %seen = ();
 
 while (<>) {
-  next if $skip_comments and /^\s*(?:\S+\s+){0,$key}?#/;
+  next if $skip_comments and (/^\s*#/ or $key and /^\s*(?:\S+\s+){0,$key}?#/);
   next unless /^\s*(?:\S+\s+){$key}(-?\d+(?:\.\d+)?|\.\d+)(?:\D.*)?$/;
   my $n = 0 + $1; # force storing it as a number
   if ($do_max) {
