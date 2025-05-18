@@ -27,7 +27,7 @@ OPTIONS
 version() {
   printf %s "Using "
   hexdump --version 2>/dev/null || man hexdump 2>/dev/null |awk '
-    END { sub(/   +.*/, ""); if (NR) print "hexdump from", $0 }'
+    END { sub(/   .*/, ""); if (NR) print "hexdump from", $0 }'
   echo "Part of misc-scripts: https://github/adamhotep/misc-scripts"
   echo "hd-wrapper 2.0.20240721.2 Copyright 2005+ by Adam Katz," \
        "GPLv3+ / BSD 2-clause"
@@ -81,6 +81,7 @@ _colorhd() {
   fi
   awk -v red="$red" -v yel="$yel" -v blu="$blu" -v prp="$prp" -v cyn="$cyn" \
       -v inv="$inv" -v off="$off" -v unicode=$unicode '
+    BEGIN { for(i = 0; i < 256; i++) hex2int[sprintf("%02x", i)] = i }
     # update blockarr[] with string str, shade ss, and at position ii
     function swap(str, ss, ii) {
       if (!ii) ii = i			# ii uses i when unspecified
@@ -90,56 +91,60 @@ _colorhd() {
       if (shade != off) blockarr[ii] = blockarr[ii] shade
       blockarr[ii] = blockarr[ii] str cyn
     }
-    length($2) == 2 && block = match($0, /\|.*\|$/) {
-      count = length($1)
-      codes = substr($0, count + 1, block - count - 1)
-      space = sprintf("%*s", 1 + length(codes) - match(codes, / +$/), "")
-      count = substr($0, 1, count)
-      blocklen =  split(substr($0, block), blockarr, "")
-      swap("", prp, blocklen)	# color the last character of the block
-      hex = " "
-      i = 1
-      for (char = 3; $(++i) ~ /^[0-9a-fA-F][0-9a-fA-F]$/; char+=3) {
-        if (i > 2 && i % 8 == 2) { hex = hex " "; char++ }	# space every 8
-        shade = cyn
-        c = substr(codes, char, 2)			# target value
-        if (c == "  ") { hex = hex "   "; continue }	# no value
-        c = ("0x" substr(codes, char, 2)) / 1		# numeric (decimal) code
+    length($2) == 2 {
+      block = match($0, /\|.*\|$/)
+      if (block) {
+        count = length($1)
+        codes = substr($0, count + 1, block - count - 1)
+        # busybox awk lacks "%*s" support, so we concatenate the value inside
+        space = sprintf("%" 1 + length(codes) - match(codes, / +$/) "s", "")
+        count = substr($0, 1, count)
+        blocklen =  split(substr($0, block), blockarr, "")
+        swap("", prp, blocklen)	# color the last character of the block
+        hex = " "
+        i = 1
+        for (char = 3; $(++i) ~ /^[0-9a-fA-F][0-9a-fA-F]$/; char+=3) {
+          if (i > 2 && i % 8 == 2) { hex = hex " "; char++ }	# space every 8
+          shade = cyn
+          c = substr(codes, char, 2)			# target value
+          if (c == "  ") { hex = hex "   "; continue }	# no value
+          c = hex2int[substr(codes, char, 2)] / 1	# numeric (decimal) code
 
-        if (c == 0) {					# null is inverted red
-          if (unicode) swap("\xe2\x90\x80", red)
-          else swap("0", red)
-        }
-        else if (c  < 32 || 126 < c && c < 160) {	# controls: invert
-          shade = inv
-          if (unicode) {
-            if (c < 32) 	swap(sprintf("\xe2\x90%c", c + 128)) # C0 code
-            else if (c == 0x7f)	swap("\xe2\x90\xa1")		# delete
-            else		swap(".")
+          if (c == 0) {					# null is inverted red
+            if (unicode) swap("\xe2\x90\x80", red)
+            else swap("0", red)
           }
-          else	swap(".")
-        } else if (c > 47 && c < 58) {		# numbers are yellow
-          swap("", yel)
-        } else if (c > 64 && c < 91 || c > 96 && c < 123) {	# white letters
-          swap("", off)
-        } else if (c >= 160) {			# higher unicode is blue
-          shade = blu
-          if (c == 160) swap(" ")		# no-break space -> space
-          else if (unicode && c < 192)	swap(sprintf("\xc2%c", c))
-          else if (unicode)		swap(sprintf("\xc3%c", c - 64))
-          else		swap(".")
-        } else {
-          swap()
-        }
+          else if (c  < 32 || 126 < c && c < 160) {	# controls: invert
+            shade = inv
+            if (unicode) {
+              if (c < 32) 	swap(sprintf("\xe2\x90%c", c + 128)) # C0 code
+              else if (c == 0x7f)	swap("\xe2\x90\xa1")		# delete
+              else		swap(".")
+            }
+            else	swap(".")
+          } else if (c > 47 && c < 58) {		# numbers are yellow
+            swap("", yel)
+          } else if (c > 64 && c < 91 || c > 96 && c < 123) {	# white letters
+            swap("", off)
+          } else if (c >= 160) {			# higher unicode is blue
+            shade = blu
+            if (c == 160) swap(" ")		# no-break space -> space
+            else if (unicode && c < 192)	swap(sprintf("\xc2%c", c))
+            else if (unicode)		swap(sprintf("\xc3%c", c - 64))
+            else		swap(".")
+          } else {
+            swap()
+          }
 
-        if (shade) { hex = sprintf("%s %s%02x%s", hex, shade, c, off) }
-        else       { hex = sprintf("%s %02x", hex, c) }
+          if (shade) { hex = sprintf("%s %s%02x%s", hex, shade, c, off) }
+          else       { hex = sprintf("%s %02x", hex, c) }
+        }
+        if (full == 0) full = char
+        block = ""
+        for (i = 1; i <= blocklen; i++) block = block blockarr[i]
+        print prp count off hex space prp block off
+        next
       }
-      if (full == 0) full = char
-      block = ""
-      for (i = 1; i <= blocklen; i++) block = block blockarr[i]
-      print prp count off hex space prp block off
-      next
     }
     { x=""; if (! sub(/ /, off "&")) x = off; print prp $0 x; next }
     END { exit ! (full > 0) }
