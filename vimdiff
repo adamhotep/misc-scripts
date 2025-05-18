@@ -37,7 +37,7 @@ symlink named gvimdiff that points to it (if you have gvim installed).
 version() { cat <</version
 Wraps $(vim_version "vim (version unknown, '$vim --help' failed)")
 Part of misc-scripts: https://github/adamhotep/misc-scripts
-vimdiff-auto 2.2.20241025.0 copyright 2009+ by Adam Katz, GPLv3
+vimdiff-auto 2.2.20240523.0 copyright 2009+ by Adam Katz, GPLv3
 /version
   exit
 }
@@ -258,13 +258,15 @@ for arg in "$@"; do
       continue
     fi
   fi
+  # TODO: allow nonexistant last or penultimate
+  # in order to work like `vimdiff <(git show $rev:$file) $file`
   if [ -e "$last" ]; then penultimate="$last"; fi
   if [ -e "$arg" ]; then last="$arg"; fi
   set -- "$@" "$arg"
 done
 
 # no file arguments: open a diff between two new files
-if [ ! -e "$last" ]; then
+if [ -z "$last" ]; then
   set -- "$@" +"$split|enew|diffthis"
 
 # Just one file
