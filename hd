@@ -11,25 +11,37 @@ help() { cat <</help
 Enhanced hex dump wrapper (colors and wide options)
 Usage: ${0##*/} [OPTIONS] [FILE...]
 OPTIONS
-  -1, --narrow      Display the canonical 16 bytes per line (default)
-  --color[=WHEN]    Use colors to denote different character classes
-                    WHEN may be: always, auto (default), map (help), or never
-  --help-colors     Display a mapping of what colors means what (--color=map)
-  -n LENGTH         Interpret only only LENGTH bytes of input
-  -U, --no-unicode  Disable inserting Unicode stand-ins for non-printing chars
-  -v                Display all input data (do not compress with asterisks)
-  -w, --wide        Display 32 bytes per line
+  -1, --narrow        Half-width display: only one 8-byte column (8B/line)
+  -2, --width=4       Double-width display: four 8-byte columns, 32B/line
+  -C, --canonical     Display two 8-byte columns with hexdump's built-in logic
+  --color[=WHEN]      Use colors to denote different character classes
+                      WHEN may be: always, auto (default), map (help), or never
+  --exec=PATH         Path to the \`hexdump\` (or \`hd\`) executable
+  -F, --final-count   Add a final count line like canonical hd (--canonical)
+  --help-colors       Display a mapping of what colors means what (--color=map)
+  -n LENGTH           Interpret only only LENGTH bytes of input
+  -U, --no-unicode    Disable inserting Unicode stand-ins for non-printing chars
+  -v, --no-squeezing  Display all input data (do not compress with asterisks)
+  -w, --wide          Display as many 8-byte columns as fit on the terminal
+  -W, --width=NUM     Display NUM 8-byte columns (default=2, showing 16B/line)
 
 /help
   version
 }
 
 version() {
-  printf %s "Using "
-  hexdump --version 2>/dev/null || man hexdump 2>/dev/null |awk '
-    END { sub(/   .*/, ""); if (NR) print "hexdump from", $0 }'
+  v="$("$hexdump" --version 2>&1)"
+  if [ $? != 0 ]; then
+    v="hexdump from $(echo "$v" |grep -m1 '[0-9]\.[0-9]' || echo "$hexdump")"
+  elif [ -z "$v" ]; then
+    v="$(man hexdump 2>/dev/null |awk '
+           END { sub(/   .*/, ""); if (NR) print "hexdump from", $0 }')"
+  fi
+  if [ -n "$v" ]; then
+    echo "$v"
+  fi
   echo "Part of misc-scripts: https://github/adamhotep/misc-scripts"
-  echo "hd-wrapper 2.0.20250518.0 Copyright 2005+ by Adam Katz," \
+  echo "hd-wrapper 2.1.20250528.0 Copyright 2005+ by Adam Katz," \
        "GPLv3+ / BSD 2-clause"
   exit
 }
@@ -40,6 +52,9 @@ Change log:
 1.0.3.20230102 First git commit, changes unknown (iirc, color support)
 2.0.20240721.0 Better option parsing, Unicode, new color map, spacing bugfix
 2.0.20250518.0 Support for mawk 1.3.4.20241212+ and busybox
+2.1.20250528.0 Auto/arbitrary width (changes -w/--wide & -1/--narrow, adds -W)
+
+Complete chagelog: https://github.com/adamhotep/misc-scripts/commits/main/hd
 /changelog
   exit
 }
@@ -70,7 +85,7 @@ die() {
 }
 
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
-save_arg() { argv="$argv${argv:+$sep}-$long$OPT$OPTARG"; }
+save_opt() { argv="$argv${argv:+$sep}-$long$OPT$OPTARG"; }
 
 ### end of helper functions }}}
 
@@ -97,7 +112,7 @@ _colorhd() {
       if (block) {
         count = length($1)
         codes = substr($0, count + 1, block - count - 1)
-        # busybox awk lacks "%*s" support, so we concatenate the value inside
+        # busybox awk lacks "%*s" support, so we concatenate the length inside
         space = sprintf("%" 1 + length(codes) - match(codes, / +$/) "s", "")
         count = substr($0, 1, count)
         blocklen =  split(substr($0, block), blockarr, "")
@@ -106,7 +121,6 @@ _colorhd() {
         i = 1
         for (char = 3; $(++i) ~ /^[0-9a-fA-F][0-9a-fA-F]$/; char+=3) {
           if (i > 2 && i % 8 == 2) { hex = hex " "; char++ }	# space every 8
-          shade = cyn
           c = substr(codes, char, 2)			# target value
           if (c == "  ") { hex = hex "   "; continue }	# no value
           c = hex2int[substr(codes, char, 2)] / 1	# numeric (decimal) code
@@ -127,14 +141,16 @@ _colorhd() {
             swap("", yel)
           } else if (c > 64 && c < 91 || c > 96 && c < 123) {	# white letters
             swap("", off)
-          } else if (c >= 160) {			# higher unicode is blue
+          } else if (c == 160) {			# no-break space
+            if (unicode) swap("\xe2\x8d\xbd", blu)	# shouldered open box
+            else swap(" ")				# regular space
+          } else if (c > 160) { 			# higher unicode is blue
             shade = blu
-            if (c == 160) swap(" ")		# no-break space -> space
-            else if (unicode && c < 192)	swap(sprintf("\xc2%c", c))
+            if (unicode && c < 192)	swap(sprintf("\xc2%c", c))
             else if (unicode)		swap(sprintf("\xc3%c", c - 64))
-            else		swap(".")
+            else			swap(".")
           } else {
-            swap()
+            swap("", cyn)			# space/punctuation: cyan
           }
 
           if (shade) { hex = sprintf("%s %s%02x%s", hex, shade, c, off) }
@@ -159,7 +175,8 @@ _colorhd() {
 # Unique separator: start of heading (\x01), <, PID, >, start of text (\x02)
 # This allows us to preserve spacing from option arguments later
 sep="<$$>"	# THIS LINE CONTAINS ESCAPE CHARACTERS. sep="\x01<$$>\x02"
-argv= canonical= map= unicode=1 unsupported=
+argv= canonical= final_count= help= hexdump=hexdump map= unicode=1 unsupported=
+version= width=2
 
 # Load default colors from the environment
 if [ -n "$NO_COLOR" ]; then
@@ -170,53 +187,91 @@ else	# default to auto as if $CLICOLOR is on (you're here for color, right?)
   color=auto
 fi
 
-while getopts 12bcCde:f:hLn:s:oUvVwx-: OPT; do
+while getopts 12bcCde:f:FhLn:s:oUvVwW:x-: OPT; do
   long=
   if [ "$OPT" = - ]; then  # --long, https://stackoverflow.com/a/28466267/519360
     OPT="${OPTARG%%=*}" OPTARG="${OPTARG#"$OPT"}" OPTARG="${OPTARG#=}" long="-"
   fi
   case "$OPT" in
-    ( [bcdoxX] | one-by* | two-by* )	unsupported=1; save_arg ;;
-    ( 1 | narrow )	wide=0 ;;
-    ( [2w] | wide )	wide=1 ;;
-    ( C | canonical )	canonical=1 wide=0; save_arg ;;
+    ( [bcdoxX] | one-by* | two-by* )	unsupported=1; save_opt ;;
+    ( 1 | narrow )	width=1 ;;	# half-width: 8 bytes in 1 column
+    ( 2 )		width=4 ;;	# double-width: 32 bytes in 4 columns
+    ( C | canonical )	canonical=1 width=2; save_opt ;;
     ( change* ) 	changelog ;;
-    ( [ef] | format* )	unsupported=1; needs_arg; save_arg ;;
+    ( [ef] | format* )	unsupported=1; needs_arg; save_opt ;;
+    ( exec* )		needs_arg; hexdump="$OPTARG" ;;
+    ( F | final-count )	final_count='-e "%08.8_Ax\n"' ;;
     ( help*colo*r* )	map=1 ;;
-    ( h | help* )	help ;;
+    ( h | help* )	help=1 ;;
     ( L | color )	color="${OPTARG:-always}" ;;
-    ( n | length )	needs_arg; save_arg ;;
-    ( s | skip )	needs_arg; save_arg ;;
+    ( n | length )	needs_arg; save_opt ;;
+    ( s | skip )	needs_arg; save_opt ;;
     ( U | no-unicode )	unicode=0 ;;
-    ( V | version )	version ;;
+    ( V | version )	version=1 ;;
+    ( [wW] | wid[et]* )	width="${OPTARG:-auto}" ;;
     ( \?* )		die ;;
     ( ??* )		die "Illegal option $OPT" ;;
-    ( * )		save_arg ;;
+    ( * )		save_opt ;;	# some options are just pass-throughs
   esac
 done
 shift $((OPTIND-1))
 
-if ! command -v hexdump >/dev/null; then
-  if command -v busybox >/dev/null && busybox --list |grep -qFx hexdump; then
-    hexdump() { busybox hexdump "$@"; }
+if [ "${hexdump##*/}" = busybox ]; then
+  busybox="$hexdump"
+else
+  busybox=busybox
+fi
+
+if ! command -v "$hexdump" >/dev/null || [ "$busybox" != busybox ]; then
+  if [ "$hexdump" != hexdump ] && [ "$busybox" = busybox ]; then
+    die "Could not run hexdump executable at \`$hexdump\`"
+  elif command -v busybox >/dev/null && busybox --list |grep -qFx hexdump; then
+    busybox_hexdump() {
+      if [ "$1" = --version ]; then
+        "$busybox" |awk '{ print "hexdump from", $0; exit }'
+      else
+        "$busybox" hexdump "$@";
+      fi
+    }
+    hexdump=busybox_hexdump
   else
-    die "ERROR, hexdump is not installed (consider bsdmaintools or busybox)"
+    die "ERROR, hexdump is not a command (try --exec=PATH as noted in --help)" \
+        "To install hexdump, look for a package like bsdmaintools or busybox)"
   fi
 fi
 
-poe='"  " 8/1 "%02x "'	# pieces of eight
-if   [ "$wide" = 1 ] && [ -z "$unsupported$canonical" ]; then
-  # --wide: double-wide hd, https://stackoverflow.com/a/58600201/519360
-  # to show a final line counter, prefix with:  -e '"%07.7_Ax\n"'
-  set -- -e '"%07.7_ax" '"$poe $poe $poe $poe" -e '"  |" 32/1 "%_p" "|\n"' "$@"
-elif [ -z "$unsupported$canonical" ]; then
-  # recreates `hd` but without the trailing line marking the final character
-  # ... bring that back by prepending these arguments: -e '"%08.8_Ax\n"'
-  # (this is the same thing as the -C flag, so we avoid duplicating the output)
-  set -- -e '"%08.8_ax" '"$poe $poe" -e '"  |"16/1 "%_p""|\n"' "$@"
+# these were deferred so we could say which hexdump version we're using
+if [ "$help" = 1 ]; then
+  help
+elif [ "$version" = 1 ]; then
+  version
 fi
 
-# Split $ARGV and compose final $@ with preseved spacing
+poe='"  " 8/1 "%02x "'	# pieces of eight
+if [ -z "$unsupported$canonical" ]; then
+  # --width: wider hd, https://stackoverflow.com/a/58600201/519360
+  if [ "$width" = auto ]; then	# yeah, this allows for NARROWER views too
+    if ! [ "$COLUMNS" -ge 45 ] 2>/dev/null; then
+      COLUMNS="$(tput cols)" || die "Couldn't detect your view's width"
+      if ! [ "$COLUMNS" -ge 45 ] 2>/dev/null; then
+        die "Your terminal must be 45+ columns wide to automatically set it." \
+            "Try --width=NUM instead. Learn more with --help"
+      fi
+    fi
+    width=$(( (COLUMNS - 12) / 33 ))	# 12 = 8 @counter + 2 spaces + 2 pipes
+    : $width
+  elif ! [ "$width" -gt 0 ] 2>/dev/null; then
+    die "Width \`$width\` is not supported. Try \`auto\` or an integer > 0"
+  fi
+  i=0 codes=
+  while [ $((i+=1)) -le $width ]; do
+    codes="$codes${codes:+ }$poe"
+  done
+  set -- $final_count -e '"%08.8_ax" '"$codes" \
+    -e '"  |" '$((width*8))'/1 "%_p" "|\n"' "$@"
+fi
+
+# Split $argv and compose final $@ with preseved spacing
 while [ -n "$argv" ]; do
   set -- "${argv##*$sep}" "$@"
   if [ "$argv" = "${argv##*$sep}" ]; then break; fi
@@ -245,4 +300,4 @@ if [ -n "$map" ]; then color_map; fi
 
 ### end of option parsing }}}
 
-hexdump "$@" |_colorhd
+"$hexdump" "$@" |_colorhd
