@@ -26,15 +26,24 @@ url='https://github.com/adamhotep/misc-scripts'
 
 version() {
   echo "Part of misc-scripts: $url"
-  echo "cal-wrapper 0.3.20240806.0 copyright 2019+ by Adam Katz, GPL v2+"
+  echo "cal-wrapper 0.4.20250711.0 copyright 2019+ by Adam Katz, GPL v2+"
   exit
 }
 
 die() { [ $# -gt 0 ] && printf "%s\n" "$@" >&2; exit 2; }
+bb() { true; }	# we call this to warn about Busybox cal's limited options
 
 if ! command -v ncal >/dev/null; then
-  die 'You do not appear to have the `ncal` program that this wraps.' \
-      'Maybe try `apt install ncal` or something similar?'
+  exe="/usr/bin/cal"
+  if [ "$exe" != "$0" ] && [ -x "$exe" ]; then
+    ncal() { shift; "$exe" "$@"; }
+  elif command -v busybox >/dev/null && busybox cal --help >/dev/null 2>&1; then
+    ncal() { shift; busybox cal "$@"; }
+    bb() { die "Option \`-$OPT\` requires installing \`ncal\`"; }
+  else
+    die 'This script wraps either `ncal` or `busybox cal` but you lack both.' \
+        'Maybe try `apt install ncal` or `apt install busybox`, etc.'
+  fi
 fi
 
 run() {
@@ -49,51 +58,40 @@ run() {
   exit $?
 }
 
-# Usage: normalize STRING
-# Convert Unicode to ASCII and lowercase the input
-normalize() {
-  local non='[!0-9A-Za-z]'
-  # While I created https://stackoverflow.com/a/78790871/519360 for POSIX awk
-  # to properly lowercase Unicode text, converting to ASCII is preferable here.
-  # We only need to throw an error if non-ASCII-letters are to be analyzed.
-  case "$1" in
-    ( $non* | ?$non* | ??$non* | ???$non* )
-      if ! command -v utf2ascii >/dev/null; then
-        die "utf2ascii is needed for non-ASCII letters" "Get it at: $url"
-      fi
-      echo "$*" |utf2ascii
-      ;;
-    ( * ) echo "$*" ;;
-  esac |tr '[:upper:]' '[:lower:]'
+datefrom() {
+  out=$(date -d "2000-$2-15" +"%$1") 2>/dev/null	# GNU or Busybox date
+  if [ -z "$out" ]; then
+    datefrom() {
+      local out="$(date -jf %m $2 +"%$1")" 2>/dev/null || return 2  # BSD date
+      printf %s "$out"
+    }
+    datefrom "$@" || die 'ERROR: missing `locale` & GNU/busybox/BSD `date`'
+  fi
+  printf %s "$out"
 }
 
 # Usage: month NAME
-# Prints the number associated with month NAME. (This is locale-aware.)
+# Extract the locale's list of months and print the number for month NAME
 month() {
-  # afaict, LC_ALL trumps LANG which trumps LC_TIME, so we read in that order.
-  local m="$(normalize "$1")" lang=${LC_ALL:-$LANG}
-  if [ -z "$lang" ]; then lang="${LC_TIME:-en_US.UTF-8}"; fi
-  # Yes, cal truncates: `cal -m junk` works with FreeBSD 11.2 & ncal 12.1.8
-  # Shortcut: we always accept certain common abbreviations, incl all English.
-  # Abbreviations from https://web.library.yale.edu/cataloging/months#page-title
-  # Supported: en de es fr it pl pt ro (note how they're alphabetical)
-  case "${lang%%_*}:$m" in
-    # NOTE: this is after converting Unicode to ASCII -- no accents here!
-    ( *:jan* | es:ene* | it:gen* | pl:sty* | ro:ian* ) m=1 ;;
-    ( *:feb* | fr:fev* | pl:lut* | pt:fev* ) m=2 ;;
-    ( *:mar* ) m=3 ;;
-    ( *:apr* | es:abr* | fr:avr* | pl:kwi* | pt:abr* ) m=4 ;;
-    ( *:may* | *:mai* | it:mag* | pl:maj* ) m=5 ;;
-    ( *:jun* | fr:juin* | it:giu* | pl:cze* | ro:iun* ) m=6 ;;
-    ( *:jul* | fr:juil* | it:lug* | pl:lip* | ro:iul* ) m=7 ;;
-    ( *:aug* | es:ago* | fr:aou* | it:ag* | pl:sie* | pt:ago* ) m=8 ;;
-    ( *:sep* | it:set* | pl:wrz* | pt:set* ) m=9 ;;
-    ( *:oct* | de:okt* | it:ott* | pl:paz* | pt:out* ) m=10 ;;
-    ( *:nov* | pl:lis* | ro:noi* ) m=11 ;;
-    ( *:dec* | de:dez* | es:dic* | it:dic* | pl:gru* | pt:dez* ) m=12 ;;
-    ( * ) [ ! "$m" -le 12 ] 2>/dev/null && die "$self: invalid month '$1'" ;;
-  esac
-  echo "$m"
+  # POSIX requires locale, but here's a fallback using GNU/busybox/BSD date:
+  { locale LC_TIME 2>/dev/null \
+    || echo && for b in b B; do  # %b = abmon (abbreviated) and %B = mon (full)
+      n=0 d='\n'
+      while [ $((n+=1)) -le 12 ]; do
+        printf "$d"
+        datefrom $b $n
+        d=';'
+      done
+    done
+  } |awk -v name="$1" '
+    BEGIN { name = tolower(name); len = length(name) }	# lowercase, length
+    NR == 3 || NR == 4 {	# abbreviated month or full month
+      split(tolower($0), list, ";")	# split lowercased list of names
+      for (m=1; m<13; m++) if (name == list[m]) exit		# exact match
+      if (len > 2) for (m=1; m<13; m++) if (1 == index(list[m], name)) exit
+    }
+  END { if (m == 13) exit 1; print m }	# exit with error if we failed to match
+  '
 }
 
 # Usage: dateas [DATE_OPTIONS] [+DATESPEC]
@@ -134,18 +132,18 @@ while getopts 139A:B:Cd:hjm:vVW:y-: OPT; do
     OPT="${OPTARG%%=*}" OPTARG="${OPTARG#"$OPT"}" OPTARG="${OPTARG#=}"
   fi
   case "$OPT" in
-    ( 1 | one* )	push -1 ;;
-    ( 3 | three* )	push -3 ;;
-    ( 9 | nine* )	push -A4 -B4 ;;
-    ( A | after )	needs_arg; push -A "$OPTARG" ;;
-    ( B | before )	needs_arg; push -B "$OPTARG" ;;
+    ( 1 | one* )	bb; push -1 ;;
+    ( 3 | three* )	bb; push -3 ;;
+    ( 9 | nine* )	bb; push -A4 -B4 ;;
+    ( A | after )	bb; needs_arg; push -A "$OPTARG" ;;
+    ( B | before )	bb; needs_arg; push -B "$OPTARG" ;;
     ( C )		: "ignoring redundant -C" ;;
-    ( d | date )	needs_arg; now="$(dateas "@$OPTARG")"; push -d "$now" ;;
+    ( d | date )	bb; needs_arg; push -d "$(dateas "@$OPTARG")" ;;
     ( h | help )	help ;;  # note, the other -h is somehow just for ncal
     ( j | julian )	push -j ;;
     ( m | month)	abort=abort; push -m "$OPTARG" ;;	# bypass script
     ( [Vv] | ver* )	version ;;
-    ( W | week-min* )	needs_arg; push -W "$OPTARG" ;;
+    ( W | week-min* )	bb; needs_arg; push -W "$OPTARG" ;;
     ( y | year* )	push -y ;;
     ( \? )		die ;; # bad short option (error reported via getopts)
     ( * )		die "Illegal option --$OPT" ;; # bad long option
