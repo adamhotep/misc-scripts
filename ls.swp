@@ -17,12 +17,14 @@ ls.swp - Show notes on vim swap files
 
 B<ls.swp> [OPTIONS] [SWAP_FILE...]
 
- -H      Always show swap file names
- -h      Suppress showing of swap file names
- -v      Verbose (implies -H)
+ -H  Always show swap file names
+ -h  Suppress swap file names (sole arg? use `ls.swp -hh` to avoid help)
+ -q  Quiet: exit true iff swap files exist and are *all* still running
+ -r  Recursive: traverse subdirectories as they are found
+ -v  Verbose (implies -H)
 
 Part of misc-scripts: https://github.com/adamhotep/misc-scripts
-ls.swp 0.3.20210516.1 Copyright 2017+ by Adam Katz, GPL v2+
+ls.swp 0.4.20251023.0 Copyright 2017+ by Adam Katz, GPL v2+
 
 =cut
 # further documentation lives at the end of this file
@@ -31,7 +33,8 @@ s/[BCEFILNSZ]<([^>]*)>/$1/g;  # remove pod formatting code markup
 my @pod = split(/\r?\n/, $_);
 my ($name, $blurb) = $pod[2] =~ /^(\S+) - (.+)$/;
 my $version = $pod[$#pod-1];
-($main::VERSION) = $version =~ /^$name\s(\S+)/;
+$version =~ /^$name\s(\S+)/;
+our $VERSION = $1;
 
 my $usage = $pod[6];
 my $synopsis = "";
@@ -54,16 +57,16 @@ sub version {
   exit;
 }
 
-HELP_MESSAGE() if scalar @ARGV == 1 and $ARGV[0] eq "-h"; # get help if just -h
+# --help and a bare -h will get help (avoid with `ls.swp -hh` or `ls.swp -h .`)
+HELP_MESSAGE() if scalar @ARGV == 1 and $ARGV[0] =~ /^-(?:h$|-help)/;
 
 # defaults
+my $no_params = 0;
 my $show_names = 0;
 my $show_pids = 0;
 
 my %opt = ();
-getopts("hHvV", \%opt) or die $usage;
-
-@ARGV = <.*.sw?> unless @ARGV;  # default to all swap files in current directory
+getopts("hHqrvV", \%opt) or die $usage;
 
 # TODO: abandon grep options and use
 #   show/hide sections: sS=swap, uU=user, hH=host, fF=file, aA=age
@@ -72,12 +75,13 @@ getopts("hHvV", \%opt) or die $usage;
 if    ($opt{v})  { $show_names = $show_pids = 1; }
 elsif ($opt{H})  { $show_names = 1; }
 elsif ($opt{h})  { $show_names = 0; }	# -h is trumped by -H
-elsif (scalar @ARGV > 1) { $show_names = 1; }
+else { $show_names = 2; }
 
 version()	if $opt{V};
 
 
 my $exit = 1;
+if ($opt{q}) { $exit = -1; }
 
 sub invalid {
   $_ = shift;
@@ -96,7 +100,40 @@ sub str2int {
   return $out;
 }
 
-foreach my $swap (@ARGV) {
+sub humantime {
+  my ($mtime, $age_guess) = @_;
+  my $when = time - $mtime;
+
+  if ($opt{v}) {
+    my @t = localtime($mtime);
+    $when = sprintf("%d-%02d-%02d %02d:%02d:%02d",
+              $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0]);
+  }
+  elsif ($when < 90) {	# last modified <90s ago: seconds
+    $when = sprintf("%ds", $when);
+  } elsif ($when < 5400) {	# last modified <90m ago: minutes
+    $when = sprintf("%.0fm", $when/60);
+  } elsif ($when < 172800) {	# last modified <48h ago: hours
+    $when = sprintf("%.0fh", $when/3600);
+  } elsif ($when < 7862400) {	# last modified <91d ago: days
+    $when = sprintf("%.0fd", $when/86400);
+  } elsif ($when < 47336400) {	# last modified <18mo ago: months
+    $when = sprintf("%.0fmo", $when/86400/365.25*12);
+  } else {			# last modified >1.5y ago: years
+    $when = sprintf("%.0fy", $when/86400/365.25);
+  }
+  if ($mtime == 0) {	# 1970/01/01 00:00:00 UTC
+    $when = "unknown age";
+  } else {
+    $when .= " ago" unless $opt{v};
+    $when .= " (guessed)" if $age_guess;
+  }
+  return $when;
+}
+
+sub ls_swp {
+  my $swap = shift;
+  $swap =~ s:^\./:: if $no_params;	# remove leading ./ if given no params
   open SWAP, "<:raw", $swap or invalid $swap and next;
   my $block0;
   read SWAP, $block0, 1024;
@@ -123,48 +160,52 @@ foreach my $swap (@ARGV) {
     $mtime = $stat[9];
     $age_guess = 1;
   }
-  my $when = time - $mtime;
-  if ($opt{v}) {
-    my @t = localtime($mtime);
-    $when = sprintf("%d-%02d-%02d %02d:%02d:%02d",
-              $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0]);
-  }
-  elsif ($when < 90) {	# last modified <90s ago: seconds
-    $when = sprintf("%ds", $when);
-  } elsif ($when < 5400) {	# last modified <90m ago: minutes
-    $when = sprintf("%.0fm", $when/60);
-  } elsif ($when < 172800) {	# last modified <48h ago: hours
-    $when = sprintf("%.0fh", $when/3600);
-  } elsif ($when < 7862400) {	# last modified <91d ago: days
-    $when = sprintf("%.0fd", $when/86400);
-  } elsif ($when < 47336400) {	# last modified <18mo ago: months
-    $when = sprintf("%.0fmo", $when/86400/365.25*12);
-  } else {			# last modified >1.5y ago: years
-    $when = sprintf("%.0fy", $when/86400/365.25);
-  }
-  if ($mtime == 0) {	# 1970/01/01 00:00:00 UTC
-    $when = "unknown age";
-  } else {
-    $when .= " ago" unless $opt{v};
-    $when .= " (guessed)" if $age_guess;
-  }
+  my $when = humantime($mtime, $age_guess);
 
-
-  if(system("ps $pid >/dev/null") == 0) {
+  if (kill 0, $pid) {
     if ($show_pids) {
       $pid = " (PID $pid)";
     } else {
       $pid = " (running)";
     }
+    if ($exit == -1 or !$opt{q}) { $exit = 0; }
   } else {
     $pid = "";
+    if ($exit == 1 and !$opt{q}) { $exit = 0; }
+    elsif ($exit == -1) { $exit = 1; }
   }
 
-  print "$swap:" if $show_names;
-  print "$user\@$host:$fname$dirty$pid $when\n";
+  if (!$opt{q}) {
+    print "$swap:" if $show_names;
+    print "$user\@$host:$fname$dirty$pid $when\n";
+  }
 
-  $exit = 0;
 }
+
+@ARGV = "." and $no_params = 1 unless @ARGV;	# default to the current dir
+# this must sadly be done in two steps since $show_names=2 needs to count files
+my @params = ();
+for my $f (@ARGV) {
+  if (-d $f) {			# expand directories but not recursively
+    $f =~ s:/+$::;		# strip trailing slashes
+    my @todo = ($f);
+    while (my $d = shift @todo) {
+      $d =~ s:/$::;
+      push @params, grep { -f $_ } glob("$d/.*.sw?");
+      push @todo, glob("$d/*/") if $opt{r};
+    }
+  } else {
+    push(@params, $f);
+  }
+}
+if ($show_names == 2 and scalar @params == 1) {
+  $show_names = 0;
+}
+for my $f (@params) {
+  ls_swp($f);
+}
+
+if ($exit == -1) { $exit = 1; }
 
 exit $exit;
 
