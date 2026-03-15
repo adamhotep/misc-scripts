@@ -48,12 +48,22 @@ die() {
   exit 2
 }
 
-# Usage: mktemp
-# A safe temporary file (some versions of mktemp require the structure)
-mktemp() {
-  command mktemp "$@" 2>/dev/null \
-    || command mktemp "$@" "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX" 2>/dev/null
+# Usage: _mktemp
+# A safe temporary file (some versions of mktemp may not support the structure)
+_mktemp() {
+  command mktemp "$@" "${TMPDIR:-/tmp}/zawk-$$.XXXXXX" 2>/dev/null \
+    || command mktemp "$@" 2>/dev/null
 }
+# Usage: mktemp
+# make a temporary file and save it to the list of temp files to be deleted
+mktemp() {
+  local t="$(_mktemp "$@")"
+  echo "$t" |tee -a "$tempfiles"
+}
+export tempfiles="$(_mktemp)"	# we can't use mktemp here
+echo "$tempfiles" > "$tempfiles"
+cleanup() { awk '{ printf("%s%c", $0, 0) }' $tempfiles |xargs -0 rm -f; }
+trap cleanup 0 1 2 3 4 5 6 9 11 15 18
 
 # Usage: we_have COMMAND[...]
 # True when we have all given command(s). No output.
@@ -239,7 +249,6 @@ _ZAWK_FS=$'\x1c\x01'	# file separator, start-of-heading
 _ZAWK_D=$'\x02\x1f'	# delimiter: start-of-text, unit separator
 AWK="awk"
 PROGRAM_TEXT= PROGRAM_FILE= TMP=
-trap 'rm -f $TMP $HEAD $PROGRAM_FILE' 0 1 2 3 4 5 6 9 11 15 18
 
 # most of these options are from gawk and will cause an error in other awks
 while getopts bcCd:D:e:E:f:F:ghi:l:L:MnNo:Op:PrsStv:VW:-: OPT; do
