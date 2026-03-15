@@ -5,8 +5,8 @@ use strict;
 use warnings;
 
 my $tcPROGRAM = "timecalc";
-my $tcVERSION = "0.6.20240811.0";
-sub timecalc_usage { return "Usage: $tcPROGRAM [OPTIONS] [TIME|SECONDS]"; }
+my $tcVERSION = "0.6.20251205.0";
+sub timecalc_usage { return "Usage: $tcPROGRAM [OPTIONS] [TIME|SECONDS]..."; }
 
 my $min = 60; my $hour = 60*$min; my $day = 24*$hour; my $year = 365*$day;
 
@@ -17,7 +17,7 @@ sub timecalc_help {
   TIME     Colon-separated time including seconds or a specified smallest unit
            Format is Y:D:H:M:S, 365.0 days/year (ignores leap years)
   SECONDS  A number of seconds
-  <STDIN>  The first line of standard input is used if no other input is given
+  <STDIN>  If run without arguments, lines from standard input are used instead
   OPTIONS
     --time    Output colon-delimited time regardless of input
     --seconds Output time in seconds regardless of input
@@ -196,6 +196,6 @@ if ($opt{time}) 	{ $o = "time"; }
 if ($opt{test}) 	{ timecalc_testsuite();	exit 0; }
 
 $tcPROGRAM = $0 =~ s/.*\///r;
-for (@ARGV) {
+for (@ARGV ? @ARGV : <>) {
   print timecalc($_, $o) . "\n";
 }
