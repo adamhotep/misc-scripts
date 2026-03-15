@@ -24,7 +24,7 @@ B<ls.swp> [OPTIONS] [SWAP_FILE...]
  -v  Verbose (implies -H)
 
 Part of misc-scripts: https://github.com/adamhotep/misc-scripts
-ls.swp 0.4.20251023.0 Copyright 2017+ by Adam Katz, GPL v2+
+ls.swp 0.4.20260129.0 Copyright 2017+ by Adam Katz, GPL v2+
 
 =cut
 # further documentation lives at the end of this file
@@ -32,7 +32,7 @@ ls.swp 0.4.20251023.0 Copyright 2017+ by Adam Katz, GPL v2+
 s/[BCEFILNSZ]<([^>]*)>/$1/g;  # remove pod formatting code markup
 my @pod = split(/\r?\n/, $_);
 my ($name, $blurb) = $pod[2] =~ /^(\S+) - (.+)$/;
-my $version = $pod[$#pod-1];
+my $version = $pod[$#pod];
 $version =~ /^$name\s(\S+)/;
 our $VERSION = $1;
 
