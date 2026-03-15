@@ -1,0 +1,233 @@
+#!/bin/sh
+help() {
+  printf 'Tell how long the system has been awake since its last boot.
+Usage: %s [OPTIONS]
+
+  -c, --color[=WHEN]  Color the output. WHEN is `always`, `auto`, or `never`
+                      Just `-c` or `--color` means `always`, defaults to `auto`
+                      unless `$NO_COLOR` or `$CLICOLOR_FORCE` are set
+  -C, --no-color      Same as `--color=never`
+  -h, --help          Display this helpful help
+  --load-help         Describe the coloring logic for load averages
+  --load-levels=LIST  Comma-separated list of load percents (see `--load-help`)
+                      Currently `%s,%s,%s` for warning, struggling, flailing
+  -p, --pretty        Show awake time in pretty format
+  -%%, --percent       Show load averages as percents of your CPU cores
+                      Make this the default by setting `$WAKETIME_AS_PERCENT`
+  -s, --since         Show the last wake/boot time in yyyy-mm-dd HH:MM:SS format
+  -V, --version       Display version information
+
+Note, `uptime` is faster. This can be slow when reading uncached sleep logs.
+
+' "${0##*/}" "$(color 0 33 $good)" "$(color 0 31 $warn)" \
+  "$(color 0 41 $flail)"
+  version
+}
+
+version() {
+  echo "waketime 0.1.20240512.1, Copyright 2024+ by Adam Katz, GPL v3+"
+  echo "Part of misc-scripts:  https://github.com/adamhotep/misc-scripts"
+  exit
+}
+
+load_help() {
+  m=-minute m1=$(color 1 32 1$m) m5=$(color 0 32 5$m) m15=$(color 2 32 15$m)
+  if [ $cpus -gt 1 ]; then s=s; else s=''; fi
+  cat <</load_help
+waketime color-codes your load averages.
+
+Load averages are $m1, $m5, and $m15 averages of processes that
+are waiting for the CPU to run. They are relative to your $cpus CPU core$s.
+
+The current --load-levels=$good,$warn,$flail setting is relative to cores:
+  $(color 1 32 green):         0-$good% (looking good)
+  $(color 1 33 yellow):        $good-$warn% (warning)
+  $(color 1 31 red):           $warn-$flail% (struggling)
+  $(color 1 41 inverted red):  >$flail% (flailing)
+
+To learn more, read this guide (which informed the default thresholds):
+http://blog.scoutapp.com/articles/2009/07/31/understanding-load-averages
+/load_help
+}
+
+die() { echo "$*" >&2; exit 2; }
+
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+linux_only() { die "ERROR: This only works on GNU/Linux${1+ (missing: $*)}"; }
+
+sleeplog() { journalctl -b-0 -u sleep.target -o "$@"; }
+
+# Thermometer for load averages
+# Usage: therm FIRST_COLOR NUMB.ER
+therm() {
+  first="$1"
+  n=${2%,}			# strip trailing comma if present
+  shift 2
+  n100=${n%.??}		# remove hundredths
+  n100=$n100${n#$n100.}	# re-add hundredths w/o decimal (n100 = n * 100)
+  if   [ "$n100" -lt $((cpus * good))  ]; then c=32
+  elif [ "$n100" -lt $((cpus * warn))  ]; then c=33
+  elif [ "$n100" -lt $((cpus * flail)) ]; then c=31
+  else c=41
+  fi
+  if [ -n "$WAKETIME_AS_PERCENT" ]; then
+    # from 100ths to 10000ths so we can round, then /cpu, round, then to 1000ths
+    n=$(( ( (n100 * 100) / cpus + 5) / 10 ))
+    tmp=${n%?}			# truncate to whole percents
+    n=${tmp:-0}.${n#$tmp}%	# add decimal and tenths of a percent
+  fi
+  color "$first" $c "$n"
+}
+
+help=
+load_help=
+pretty=
+since=
+
+# Default colors are set by environment variable or else are auto-detected
+if [ -n "$NO_COLOR" ]; then
+  color=never
+elif [ -n "$CLICOLOR_FORCE" ]; then
+  color=always
+else
+  color=auto
+fi
+
+while getopts cCp%hsV-: OPT; do
+  if [ "$OPT" = - ]; then # --long: https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#"$OPT"}" OPTARG="${OPTARG#=}"
+  fi
+  case "$OPT" in
+    ( c | color )	color="${OPTARG:-always}" ;;	# default to 'always'
+    ( C | no*color )	color=never ;;
+    ( h | help )	help=1 ;;
+    ( load*h* )		load_help=1 ;;
+    ( L | load* )	needs_arg; load_levels="$OPTARG" ;;
+    ( p | pretty )	pretty=1 ;;
+    ( % | p*c*t )	WAKETIME_AS_PERCENT=1 ;;
+    ( s | since )	since=1 ;;
+    ( V | version )	version ;;
+    ( \? )		exit 2 ;;
+    ( * )		die "Illegal option --$OPT" ;;
+  esac
+done
+shift $((OPTIND-1))
+
+good=70
+warn=100
+flail=500
+bad="Bad load-level triplet '$load_levels', try \`${0##*/} --load-help\`"
+case "$load_levels" in
+  ( '' )			: "no load levels specified" ;;
+  ( *,*,*,* | *[!0-9,]* )	die "$bad" ;;
+  ( [0-9]*,*[0-9],*[0-9] )	# 70,100,500
+    good=${load_levels%%,*}	# -> 70
+    warn=${load_levels#$good,}	# -> 100,500 (interim)
+    warn=${warn%,*}		# -> 100
+    flail=${load_levels##*,}	# -> 500
+    ;;
+  ( * ) die "$bad" ;;
+esac
+
+case $color in
+  ( always | [Yy]es | 1 )	color=1 ;;
+  ( auto )			if [ -t 1 ]; then color=1; else color=''; fi ;;
+  ( [Nn]* | 0 | '' )		color='' ;;
+  ( * ) 	die "${0##*/}: Invalid color '$color', see '${0##*/} --help'" ;;
+esac
+if [ -n "$color$load_help" ]; then
+  # Rather than using linux_only, here's a Mac/BSD failover
+  cpus=$(grep -c '^processor[[:space:]]*:' /proc/cpuinfo 2>/dev/null \
+    || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+fi
+if [ -n "$color" ]; then
+  color() { a="$1" b="$2"; shift 2; printf '[%d;%dm%s[m' "$a" "$b" "$*"; }
+else
+  color() { shift 2; printf %s "$*"; }
+fi
+
+if [ -n "$help" ]; then
+  help
+elif [ -n "$load_help" ]; then
+  load_help
+  exit
+fi
+
+command -v journalctl >/dev/null 2>&1 || linux_only "journalctl from systemd"
+
+# Note, the second item in /proc/uptime is uboot
+boot=$(uptime -s 2>/dev/null) || linux_only "uptime supporting the -s flag"
+uboot=$(date -d "$boot" +%s 2>/dev/null) \
+  || linux_only "date supporting the -d flag"
+
+if [ "$since" = 1 ]; then
+  last=$(sleeplog short-iso -n+1)
+  if [ "$last" = "${last#20[0-9][0-9]-[01]}" ]; then
+    echo "$boot"
+  else
+    date -d "${last%% *}" +"%Y-%m-%d %T"
+  fi
+  exit
+fi
+
+# Calculate the time this system has spent sleeping.
+# Example input from sleeplog (sets sleeptime=600):
+#    1234000000.1234567 tabasco systemd[1]: Reached target sleep.target - Sleep.
+#    1234000600.1234567 tabasco systemd[1]: Stopped target sleep.target - Sleep.
+sleeptime=$(
+  sleeplog short-unix |awk '
+    $4 == "Reached" { start = $1 }
+    $4 == "Stopped" { time += ($1 - start) }
+    END { printf "%.0f", time }
+  '
+)
+
+awake=$(( $(date +%s) - uboot - sleeptime ))
+t="$awake"
+d=$((t / 86400))
+t=$((t - d * 86400))
+h=$((t / 3600))
+t=$((t - h * 3600))
+m=$((t / 60))
+
+if [ "$pretty" = 1 ]; then
+  # ironically, "pretty" doesn't get colors
+  o="awake"
+  c=
+  if [ "$d" -ge 7 ]; then o="$o $((d / 7)) weeks" d=$((d - d * 7)) c=,; fi
+  if [ "$d" -gt 0 ]; then o="$o$c $d days" c=,; fi
+  if [ "$h" -gt 0 ]; then o="$o$c $h hours" c=,; fi
+  if [ "$m" -gt 0 ] || [ "$awake" -lt 60 ]; then o="$o$c $m minutes"; fi
+  echo "$o"
+  exit
+fi
+
+plural=
+if [ "$d" -gt 1 ]; then
+  plural=s
+fi
+if [ "$d" -gt 0 ]; then
+  d="$(color 0 36 $d day$plural), "	# yellow
+else
+  d=
+fi
+if [ "$h" -gt 0 ]; then
+  hm="$(printf "% 2d:%02d" "$h" "$m")"
+else
+  hm="$m minutes"
+fi
+
+# e.g. " 00:01:23 up 8 days,  8:08,  1 user,  load average: 1.23, 1.00, 0.99"
+# note, this is also in /proc/loadavg
+up=$(uptime)
+u=${up% user*}		# " 00:01:23 up 8 days,  8:08,  1"
+u=${u% *}		# " 00:01:23 up 8 days,  8:08,"
+time="${up% up *}"	# " 00:01:23"
+#		 $1 $2     $3   $4       $5    $6    $7
+set -- ${up#$u}	# 1 user,  load average: 1.23, 1.00, 0.99
+
+printf "%s awake %s%s,  %s %s  %s %s %s, %s, %s\n" \
+  "$time" "$d" "$(color 0 32 $hm)" "$(color 1 35 $1)" "$(color 0 35 $2)" \
+  "$3" "$4" "$(therm 1 $5)" "$(therm 0 $6)" "$(therm 2 $7)"
+
