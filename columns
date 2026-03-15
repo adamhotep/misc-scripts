@@ -36,7 +36,7 @@ sub help {
 
 sub version {
   print "Part of misc-scripts: https://github.com/adamhotep/misc-scripts\n";
-  print "columns 0.5.20240602.1 Copyright 2010+ by Adam Kat, GPL v2+\n";
+  print "columns 0.5.20260211.0 Copyright 2010+ by Adam Kat, GPL v2+\n";
 }
 
 my @lengths;
@@ -195,6 +195,7 @@ if ($opts{join}) {
     # account for a gutter on every column except the last
     my $cols = int( ($opts{width} + $gutter_len) / ($longest + $gutter_len) );
     $cols = $opts{limit} if $opts{limit} < $cols and $opts{limit} > 1;
+    $cols ||= 1;
     my $rows = int(@all / $cols + 1);
     for (my $i = 0; $i < $rows; $i++) {
       for my $j (0 .. $cols) {
