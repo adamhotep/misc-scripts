@@ -1,0 +1,813 @@
+#!/usr/bin/perl
+# 99%-compatible with GNU grep but with more features (is this how ack started?)
+
+# This script uses vim folds. Type `xR` to open them all.
+# {{{ (collapse some setup to let reviewers jump straight to --help)
+use strict;
+use warnings;
+use open qw/:std :utf8/;
+use Getopt::Long qw/:config no_ignore_case bundling no_getopt_compat
+                    pass_through/;
+use Text::Glob 'glob_to_regex'; 	# used for --include, --exclude, etc
+use Encode qw/decode_utf8/;
+
+my $self = $0 =~ s'.*/''gr;	# the name of this script (without the path)
+my $usage = "Usage: $self [OPTIONS] [--] PATTERNS... [--] [FILE...]";
+my $try_help = "$usage\nTry `$self --help` for more information.\n";
+my $default_colors;
+my %pattern = my %opt = ();
+my $exit = 1;
+
+sub do_help {
+  my $demo = my $rendered_colors = my $env_colors = "";
+  my $long = ($opt{'help-all'} or ! -t 1 or ($ENV{LINES} || `tput lines`) > 24);
+  $env_colors = " (from \$CGREP_COLORS)" if $ENV{CGREP_COLORS};
+  if ($opt{color}) {
+    my $i = 1;
+    $demo = "\n" . ' 'x28 . "Demo: "
+      . $opt{color} =~ s/[0-?]+/"\e[$&m" . $i++ . "\e[m"/gre;
+    $rendered_colors = "Current colors$env_colors:\n#"
+      . $opt{color} =~ s/[0-?]+/\e[$&m$&\e[m/gr;
+  } else {
+    $opt{color} = "never";
+    $rendered_colors = "Default colors$env_colors:\n#$default_colors";
+  }
+
+  # }}}
+
+  # "commented" lines are presented with `--help-all` or when there is room.
+  #             The `--help` output (with version data) should be <= 22 lines.
+  # "exclaimed" lines are omitted altogether. They represent GNU-only features.
+  $_ = qq{
+
+Grep with different colors for matches on given fields or patterns
+$usage
+#  or: $self [OPTIONS] -e PATTERNS [-e PATTERNS|-f FILE]... [FILE...]
+#  or: $self [OPTIONS] -f FILE [-e PATTERNS|-f FILE]... [FILE...]
+
+PATTERNS is a newline-delimited list of regexps or +NUM (fields by number, 1+)
+
+Pattern interpretation:
+! -E, --extended-regexp     PATTERNS are extended regular expressions
+# -F, --fixed-strings       PATTERNS are strings, not perl regular expressions
+#                           This disables the `+FIELD` notation; consider using
+#                           `\\Q...\\E` patterns if you also want field matches.
+! -G, --basic-regexp        PATTERNs are basic regular expressions
+# -e, --regexp=PATTERNS     PATTERNS are all specified as options (everywhere)
+# -f, --file=FILE           FILE contains PATTERNs; same as `-e "\$(cat FILE)"`
+# -i, --ignore-case         Do not disginguish between capital and lowercase
+#     --no-ignore-case      Distinguish between capital and lowercase (default)
+  -t, --separator=PATTERN   * Specify a PATTERN for splitting lines into FIELDs.
+#                           PATTERN is currently `$opt{separator}`
+# -w, --word-regexp         Match only whole words; same as `\\bPATTERN\\b`
+# -x, --line-regexp         Match only whole lines; same as `^PATTERN\$`
+# -z, --null-data           Lines terminate with 0-byte characters, not newlines
+
+Miscellaneous:
+# -s, --no-messages         Suppress error messages about inputs
+# -v, --invert-match        Select only lines that do not match
+# -V, --version             Display version information
+#     --help                * Display short help (select changes from GNU grep)
+      --help-all            * Display full help
+
+Output control:
+# -m, --max-count=NUM       Show only NUM matches (* governed with `--count-by`)
+# -b, --byte-offset         Include the byte offset of each line
+# -n, --line-number         Include the line number of each line
+#     --line-buffered       Flush the output buffer with each line
+# -H, --with-filename       Output with the file name (default with 2+ inputs)
+# -h, --no-filename         Output without the file name (default given 1 input)
+#     --label=LABEL         Use LABEL as the name for standard input
+  -o, --only-matching       Output only the matched content, not whole lines
+                            * can stop mid-line given `-m` and `--count-by`
+                            * patterns are run independently; maches may overlap
+# -q, --quiet, --silent     Do not output matches
+#     --binary-files=TYPE   Assume binary files are of TYPE:
+#                           `binary` (default), `text`, or `without-match`
+# -a, --text                Same as `--binary-files=text`
+# -I                        Same as `--binary-files=without-match`
+# -d, --directories=ACTION  `read` (default), `recurse`, or `skip` directories
+# -D, --devices=ACTION      `read` (default) or `skip` devices, FIFOs, sockets
+# -r, --recursive           Same as `--directories=recurse` (skips symlinks)
+# -R, --dereference-recursive  `--directories=recurse` but also follows symlinks
+#     --include=GLOB        Only search inputs that match file pattern GLOB
+#     --exclude=GLOB        Skip search inputs that match file pattern GLOB
+#     --exclude-from=FILE   Skip search inputs that match GLOBs in FILE
+#     --exclude-dir=GLOB    Skip files in directories that match GLOB
+# -L, --files-without-match Print filenames whose contents do not match
+# -l, --files-with-matches  Print filenames whose contents match any pattern
+# -c, --count               Print counts of matches (* governed by `--count-by`)
+# -T, --initial-tab         Make tabs line up (if needed; differs from GNU)
+# -Z, --null                Print null characters after FILE names
+
+Context control:
+# -B, --before-context=NUM  Output NUMS lines of context preceding matches
+# -A, --after-context=NUM   Output NUMS lines of context following matches
+# -C, --context=NUM         Output NUMS lines of context around matches
+# -NUM                      Same as `--context=NUM` or `-B NUM -A NUM`
+#     --group-separator=SEP Output SEP on its own line between mach contexts
+#     --no-group-separator  Omit group separators
+      --count-by=METHOD     * METHOD to count matches for `-c` or `-m`:
+                            `lines` (default, per file), `matches` (per file),
+                            `total` (lines), or `total-matches` (matches)
+#     --count-empty         * With `-c`, list files with 0 matches (default)
+      --count-without-empty * With `-c`, do not list files with 0 matches
+      --color-groups        * Color groups of PATTERNS by entry, not by PATTERN
+      --color=[WHEN,]PARAM  Match color(s), * a CSV of 1+ ANSI SGR parameters;
+                            WHEN is `always` or `auto` (* default) or `never`
+                            The PARAM list defaults to \$CGREP_COLORS if set
+#                           (other colors are taken from \$GREP_COLORS)$demo
+# -U, --binary              (Windows-only) do not strip \\r (CR) at line endings
+#
+#$rendered_colors
+
+#To specify a PATTERN of `--`, either use `-e --` or something like `'\\--'`.
+#* Unlike GNU grep, matches are independent and are allowed to overlap;
+#`echo 12 |cgrep -o 12 2` has 2 hits while `echo 12 |grep -oe 12 -e 2` has 1.
+#
+#Items marked with a * are new or changed from GNU grep's behavior.
+#
+} =~ s/\A\n\n|\n!.*$//grm;	# remove leading newlines and exclaimed lines
+  if ($long) {
+    s/^#(?![# ])//gm;	# do not retain spacing for lines starting with just #
+    s/^# /  /gm;	# retain spacing for lines starting with # and space
+  } else {
+    s/^Pattern interpretation:\n//m;	# retain the leading newline at the top
+    s/^#.*\n|\n[A-Z].*:\n//gm;		# remove comments and section names
+  }
+  if ($opt{color} ne "never") {
+    s"`[^`]+`"\e[1;37;40m$&\e[m"g;	# bright white-on-black code blocks
+    s"\B\*\B"\e[1;31m*\e[m"g;		# bright red non-word-abutting asterisks
+    #s"(?<!\*)\B\*\b(.+\b)\*\B(?!\*)"\e[3m$1\e[m"g;	# markdown-like italics
+  }
+  print;
+  do_version();
+}
+
+sub do_version {
+  print "Part of misc-scripts: https://github.com/adamhotep/misc-scripts\n";
+  print "cgrep 0.1.20250101.0 Copyright 2024+ by Adam Katz, GPL v2+\n";
+}
+
+
+my $locale_utf8
+  = ($ENV{LC_ALL} // $ENV{LC_CTYPE} // $ENV{LANG} // "") =~ /UTF[_\W]?8/;
+
+sub decode_string {
+  my $raw = shift;
+  return $raw unless $locale_utf8;
+  my $decoded = decode_utf8($raw, Encode::FB_DEFAULT);
+  # The decoded string has 3+ bad Unicode characters or ASCII control characters
+  if (2 < ( () = /[\x{fffd}\x01-\x07\x0e-\x1b]/g )) {
+    return $raw;	# revert UTF-8 decoding, just use the raw bytes
+  }
+  return $decoded;
+}
+
+
+# Option parsing {{{
+
+my @new_argv = my @in_out = ();
+my %grep_colors = ();
+$default_colors = $ENV{CGREP_COLORS} || '1;31,1;32,1;33,1;34,1;35,1;36,'
+                . '1;7;31,1;7;32,1;7;33,1;7;34,1;7;35,1;7;36';
+my $cnum = '';	# for building out context from -NUM (raw-digit options)
+
+# Option mappings and default option values
+# This is sorted to match GNU grep's --help sections and order
+%opt = (
+  'ignore-case' => 0, 'no-ignore-case' => sub { $opt{'ignore-case'} = 0 },
+  separator => '\s+',
+
+  'invert-match' => 0,
+
+  max => -1, 'no-filename' => sub { $opt{'with-filename'} = 0 },
+  label => '(standard input)', 'only-matching' => 0,
+  'binary-files' => 'binary', text => sub { $opt{'binary-files'} = "text" },
+  I => sub { $opt{'binary-files'} = "without-match" },
+  directories => 'read', devices => 'read',
+  recursive => sub { $opt{directories} = 'recurse' },
+  include => sub { shift; push(@in_out, 1 . shift) },
+  exclude => sub { shift; push(@in_out, 0 . shift) },
+  'exclude-from' => sub {
+    my $from = shift;
+    open (my $x, "<:raw", $from) or die "$self: $from: $!\n";
+    while (<$x>) {
+      chomp;
+      push(@in_out, 0 . decode_string($_));
+    }
+    close $x;
+  },
+  'files-without-match' => sub { $opt{'' . shift} = 0 },
+  'files-with-match' => -1,
+
+  context => sub { shift; $opt{context_value} = shift; $cnum = '' },
+  # -NUM (raw-digit options) build incrementally, reading `-1 -2` as `-12`.
+  # GNU reads `-1h2` as `-1 -h -2` -> `-h -2` while we read it as `-h` -12`
+  0 => sub { $cnum .= 0 }, 1 => sub { $cnum .= 1 }, 2 => sub { $cnum .= 2 },
+  3 => sub { $cnum .= 3 }, 4 => sub { $cnum .= 4 }, 5 => sub { $cnum .= 5 },
+  6 => sub { $cnum .= 6 }, 7 => sub { $cnum .= 7 }, 8 => sub { $cnum .= 8 },
+  9 => sub { $cnum .= 9 },
+  'group-separator' => '--', 'no-group-separator' => 0,
+  color => "auto,$default_colors",
+  'count-by' => 'line', 'count-empty' => 1,
+  'count-without-empty' => sub { $opt{'count-empty'} = 0 },
+  binary => sub { $opt{crlf} = 1; $opt{'binary-files'} = 'binary'; },
+  '<>' => sub { push(@new_argv, @_); }	# catch-all: invalid -> @new_argv
+);
+
+@ARGV = qw/--help/ if @ARGV == 1 and $ARGV[0] eq '-h'; # standalone -h is --help
+
+#warn "ARGV: " . (@ARGV ? join(", ", @ARGV) : "(empty)");
+# This is sorted to match GNU grep's --help sections and order
+GetOptions(\%opt, qw{
+  ere|extended-regexp|E fixed-strings|F bre|basic-regexp|G pcre|perl-regexp|P
+  regexp|e=s@ file|f=s@ ignore-case|i no-ignore-case
+  separator|field-separator|fs|t=s word-regexp|w line-regexp|x null-data|z
+
+  no-messages|s invert-match|v version|V help help-all
+
+  max|max-count|m=i byte-offset|b line-number|n line-buffered
+  with-filename|H no-filename|h label=s
+  only-matching|o quiet|silent|q
+  binary-files=s text|a I
+  directories|d=s devices|D=s recursive|r dereference-recursive|R
+  include=s exclude=s exclude-from=s exclude-dir=s@
+  files-without-match|L files-with-match|l count|c initial-tab|T null|Z
+
+  before-context|B=i after-context|A=i context|C=i 1 2 3 4 5 6 7 8 9 0
+  group-separator=s no-group-separator
+  color|colour|colors|colours=s color-groups|colour-groups
+  count-by=s count-empty count-without-empty
+  binary|U <>
+});	# `or die ...` moved to the for loop below thanks to pass_through
+
+exit 1 if $opt{max} == 0;	# nonsensical but this is GNU's behavior
+
+@ARGV = (@new_argv, @ARGV);	# re-add skipped options from pass_through
+
+# recreate the complaint for invalid options (lets us accept two `--` options)
+for (my $i = 0; $i < scalar @ARGV and $ARGV[$i] ne '--'; $i++) {
+  die "$self: `$ARGV[$i]`: unrecognized option\n$try_help" if $ARGV[$i] =~ /^-./
+}
+shift if @ARGV and $ARGV[0] eq '--';	# remove first `--` if it was engaged
+
+#warn "ARGV: " . join(", ", @ARGV);
+
+# Remove WHEN from the color CSV. Returns 1 if it was removed, 0 if not
+sub color_when {
+  my ($when) = @_;
+  return $opt{color} =~ s/^$when(?:,|$)//;
+}
+
+# Determine whether we should use colors looking at the environment and options:
+# $NO_COLOR > --color=never > --color=always > $CLICOLOR_FORCE > --color=auto.
+# --color=auto is the default and is gated by `-t 1` (if standard input is open)
+my $clicolor_force = defined $ENV{CLICOLOR_FORCE};
+if (defined $ENV{NO_COLOR} or color_when('never')
+or ! $clicolor_force and ! -t 1 and color_when('auto')) {
+  $opt{color} = "0";
+} elsif (color_when('always') or color_when('auto') or $clicolor_force) {
+  $opt{color} = $default_colors unless $opt{color};
+}
+if ($opt{color} !~ /^[0-?,]*$/) {
+  die "$self: `$opt{color}`: Invalid ANSI SGR color parameter CSV\n";
+}
+
+# Set up the color list, update from $GREP_COLORS if present
+if ($opt{color}) {
+  # GNU grep defaults
+  %grep_colors = ( bn => 32, fn => 35, ln => 32, se => 36, 0 => '0;0' );
+  while ($ENV{GREP_COLORS} =~ /\b([a-z]{2}|0)=([0-?]+)\b/g) {
+    $grep_colors{$1} = $2;
+  }
+  for my $c (keys %grep_colors) {
+    $grep_colors{$c} = "\e[$grep_colors{$c}m";	# wrap with the SGR code
+  }
+} else {	# no color, use empty strings in place of color codes
+  %grep_colors = ( bn => '', fn => '', ln => '', se => '', 0 => '' );
+}
+my $c0 = $grep_colors{0};	# shorthand for resetting colors
+
+my @color = split(",", $opt{color});
+
+sub get_color {
+  my $i = shift;
+  return '' if $opt{color} eq "0";
+  # We use modulo to wrap back to the first color if we have too many patterns
+  return sprintf("\e[%sm", $color[ $i % @color ]);
+}
+
+if ($opt{help} or $opt{'help-all'}) {
+  do_help();
+  exit;
+} elsif ($opt{version}) {
+  do_version();
+  exit;
+}
+
+# -q, -l, and -L all trump -A, -B, -C, -c, and -o
+if ($opt{quiet} or $opt{'files-with-match'} != -1) {
+  $opt{context_value} = $opt{'before-context'} = $opt{'after-context'} = 0;
+  $opt{'only-matching'} = 0;
+} elsif (defined $opt{count}) {
+  # -c trumps -o, -b, and -n
+  $opt{'only-matching'} = $opt{'byte-offset'} = $opt{'line-number'} = 0;
+}
+
+# -o trumps -A, -B, -C, and -NUM
+if ($opt{'only-matching'}) {
+  $opt{context_value} = $opt{'before-context'} = $opt{'after-context'} = 0;
+} else {
+  $opt{context_value} = $cnum if $cnum ne '';
+  if (defined $opt{context_value}) {
+    $opt{'before-context'} //= $opt{context_value};
+    $opt{'after-context'} //= $opt{context_value};
+  }
+}
+
+if (defined $opt{'count-by'}) {
+  if ($opt{'count-by'} =~ /^line/) {
+    $opt{'count-by'} = 'line';
+  } elsif ($opt{'count-by'} =~ /^match/) {
+    $opt{'count-by'} = 'matches';
+  } elsif ($opt{'count-by'} =~ /^(?:total|all)-?match/) {
+    $opt{'count-by'} = 'MATCHES';
+  } elsif ($opt{'count-by'} =~ /^total|^all/) {	# or `total-line`, etc
+    $opt{'count-by'} = 'LINE';
+  } else {
+    die "$self: `$opt{'count-by'}`: Invalid `--count-by` METHOD\n"
+      . "Valid arguments are `lines` (default), `matches`, `total`, or "
+      . "`total-matches`\n" . $try_help;
+  }
+} else {
+  $opt{'count-by'} = '';
+}
+
+if ($opt{'binary-files'} !~ /^(?:binary|text|without-match)$/) {
+  die "$self: `$opt{'binary-files'}`: Invalid `--binary-files` TYPE\n"
+    . "Valid arguments are `binary` (default), `text`, or `without-match`\n"
+    . $try_help;
+}
+
+if ($opt{directories} !~ /^(?:read|recurse|skip)$/) {
+  die "$self: `$opt{directories}`: Invalid `--directories` ACTION\n"
+    . "Valid arguments are `read` (default), `recurse`, or `skip`\n"
+    . $try_help;
+}
+if ($opt{devices} !~ /^(?:read|skip)$/) {
+  die "$self: `$opt{devices}`: Invalid `--devices` ACTION\n"
+    . "Valid arguments are `read` (default) or `skip`\n"
+    . $try_help;
+}
+
+die "$self: Basic Regular Expressions (BRE) are not supported.\n" if $opt{bre};
+warn "$self: Using perl instead of Extended Regular Expressions (ERE).\n"
+  if $opt{ere};
+
+my $pre = my $post = '';
+if ($opt{'line-regexp'}) {		# -x
+  $pre = '^';
+  $post = '$';
+} elsif ($opt{'word-regexp'}) { 	# -w
+  $pre = $post = '\\b';
+}
+$pre .= '(?i)' if $opt{'ignore-case'};	# -i
+
+# The default for showing the filename is true given > 1 inputs, otherwise false
+$opt{'with-filename'} //= scalar @ARGV > 1 ? 1 : 0;
+
+my $has_includes = 0;
+for (@in_out) {
+  if (substr($_, 0, 1) eq "1") { $has_includes = 1; last; }
+}
+
+# Prep `--exclude-dir` by converting its globs to regexps
+@{$opt{'exclude-dir'}} = map { glob_to_regex($_) } @{$opt{'exclude-dir'}};
+
+# True when we're looking at an excluded directory
+sub exclude_dir {
+  my $file = shift;
+  for (@{$opt{'exclude-dir'}}) {
+    return 1 if $file =~ $_;
+  }
+  return 0;
+}
+
+# }}} Done option-parsing (except for -f and -e)
+
+
+# Set the patterns to match {{{
+
+my $item = -1;	# @color is zero-indexed and we increment this to start
+sub save {
+  $_ = shift;
+  $item++ if $opt{'color-groups'};		# color per pattern group
+  for (split(/\n/, $_)) {
+    $item++ unless $opt{'color-groups'};	# color per individual pattern
+    if ($opt{'fixed-strings'}) {
+      $_ = quotemeta $_;
+      $pattern{$pre . qr/$_/ . $post} = $item;
+    } elsif (/^\+[0-9]+$/ and $_ != 0) {	# +NUM means that field
+      my $f = substr($_, 1) - 1;
+      $pattern{qr/
+        ^					# start of line
+        (?> $opt{separator} )?			# ignore <=1 empty leading field
+        (?: .*? (?> $opt{separator} ) ){$f}	# count $f fields before
+        \K					# clear prevoius content from $&
+        .*?					# the matching field
+        (?= $opt{separator} | $ )		# the next separator or EOL
+      /x} = $item;
+    } else {				# perl regex
+      s/\\Q(.*?)\\E/ quotemeta $1 /eg;	# \Q...\E can't come through a variable
+      $pattern{qr/$pre$_$post/} = $item;
+    }
+  }
+}
+
+# -f: a file filled with patterns
+for my $file (@{$opt{file}}) {
+  local ($/, *FH);	# slurp
+  open (FH, "<:raw", $file) or die "$self: $file: $!\n";
+  save(decode_string(<FH>));
+  close FH;
+}
+
+# -e: patterns on the command line
+for (@{$opt{regexp}}) {
+  save($_);
+}
+
+# If we don't already have patterns from -f or -e, read in the patterns
+unless (%pattern) {
+  while (@ARGV) {
+    # If we got a pattern earlier in the loop and the next item is an input
+    last if %pattern and -e $ARGV[0] or $ARGV[0] eq '-';
+    $_ = shift @ARGV;
+    chomp;
+    last if $_ eq '--';
+    save($_);
+  }
+}
+
+# We need to have at least one pattern by this point
+unless (%pattern) {
+  $! = 2;	# set error code
+  die "$self: missing PATTERN\n" . $try_help;
+}
+
+# }}} done setting up patterns
+
+
+# This hash of the original CLI arguments is used to avoid skipping w/o `-R`
+my %orig_argv = map { $_ => 1 } @ARGV;
+
+@ARGV = ('-') unless @ARGV;	# without arguments, use standard input
+
+my $count = 0;	# global for `--count-by=total` and `--count-by=total-matches`
+
+FILE: while (@ARGV) {
+  my $file = shift @ARGV;
+  my $byte = my $binary_input = my $binary_output = 0;
+
+  if ($file ne '-' and not -r $file) {
+    unless ($opt{'no-messages'}) {
+      open (my $filehandle, '<:raw', $file);	# populate $! with the "why"
+      warn "$self: $file: $!\n";
+    }
+    $exit = 2;
+    next FILE;
+  }
+  if (-d $file) {	# directory traversal
+    # if $file wasn't stated on the command line, no -R, and $file is a link
+    if (! $orig_argv{$file} and ! $opt{'dereference-recursive'} and -l $file) {
+      next FILE;
+    }
+    next FILE if exclude_dir($file);
+    if ($opt{directories} eq 'read') {
+      warn "$self: $file: Is a directory\n" unless $opt{'no-messages'};
+    } elsif ($opt{directories} eq 'recurse' or $opt{'dereference-recursive'}) {
+      $file =~ s'/+$'';	# remove trailing slashes if any
+      unshift (@ARGV, glob "$file/*");
+    }
+    next FILE;
+  } elsif (-f $file) {
+    # BINARY_FILES note: perl's `-B` can't check for binary inputs on e.g.
+    # /dev/stdin because it requires a read action and we'd lose the content.
+    # This likely differs from GNU grep's implementation, whose man page seems
+    # to state that all it does is look for null characters.
+    # We'll use that logic for non-binary files and non-file inputs.
+    if (-B $file and $opt{'binary-files'} ne 'text') {
+      $binary_input = 1; # NOTE: this is slightly different than --binary-files!
+
+      # BINARY_FILES note: This matches GNU grep 3.11's *behavior* rather than
+      # its man page, which says "when grep discovers null input binary data it
+      # assumes that the rest of the file does not match", which sure implies
+      # it will display matches BEFORE the null and will exit true,
+      # but it instead exits false. `--line-buffered` does not change this.
+      next FILE if $opt{'binary-files'} eq 'without-match';
+    }
+  }
+  # `-b`= block device, `-c` = character device, `-p` = pipe, `-S` = socket.
+  # `-` (and the implicit STDIN) aren't "devices" to GNU grep or to perl
+  if (-b $file or -c $file or -p $file or -S $file) {
+    next FILE if $opt{devices} eq 'skip';
+  }
+
+  # $INPUT_RECORD_SEPARATOR dictates how lines are extracted (default = `\n`).
+  # Set to null if so requested (`--null-data`) or if detected a binary file.
+  local $/ = "\0" if $opt{'null-data'} or $binary_input;
+
+  # $OUTPUT_AUTOFLUSH: flush with every print call, see `man perlvar`
+  # or "hot" filehandles at https://perl.plover.com/FAQs/Buffering.html
+  $| = 1 if $opt{'line-buffered'};
+
+  my $nextfile = 0;
+  my @before = ();
+  my $after = my $last_after = 0;
+  my $filehandle;
+  if ($file eq '-' and not -e $file) {
+    $filehandle = \*STDIN;
+  } elsif (not open ($filehandle, '<:raw', $file)) {	# read as raw for now
+    warn "$self: $file: $!\n";
+    $exit = 2;
+    next FILE;
+  }
+
+  LINE: while (my $raw = <$filehandle>) {
+
+    # BINARY_FILES note: processing (binary vs UTF-8 vs other text)
+    # Encoding detection (UTF-8 vs other text vs binary data) is nontrivial
+    # https://www.perlmonks.org/?node_id=669909
+    # https://www.effectiveperlprogramming.com/2011/08/know-the-difference
+    # https://github.com/morungos/perl-Data-Binary/blob/master/lib/Data/Binary.pm
+
+    # Marked as binary input or the locale says we're not using Unicode.
+    if ($binary_input or not $locale_utf8) {
+      $_ = $raw;
+    } else {
+      $_ = decode_string($raw);
+    }
+
+    my $first_null = index($_, "\0");
+    # BINARY_FILES note: this is the beginning of how I intended to implement
+    # GNU grep's `-I` / `--binary-files=without-match` according to its man
+    # page, but I instead opted to match its behavior.
+    #my $null_truncated = $first_null >= 0 ? substr($_, 0, $first_null) : $_;
+
+    if ($first_null >= 0) {
+      # Yes, `--null-data`/`-z` disables this. I think that's what GNU does.
+      if ($opt{'binary-files'} eq 'without-match') {
+        #$raw = $null_truncated;
+        #$nextfile = 1;
+        # As noted above, this matches GNU grep's behavior but not its man page.
+        next FILE;
+      } elsif ($opt{'binary-files'} eq 'binary') {
+        # This better matches GNU grep's behavior than its man page.
+        $binary_output = 1;
+      }
+    }
+
+    my $orig = $_;
+
+    my $trim_len;
+    if ($/ eq "\0") {	# from $opt{'null-data'} or pre-reading $binary_input
+      $trim_len = s"$/$"";
+      #$first_null = -1;	# for BINARY_FILES by the GNU grep man page
+    } elsif ($^O =~ /(?<!dar)win/i and not $opt{crlf}) {
+      # TODO: for --binary on Windows: maybe just `$trim_len = 0` (no `chomp`)?
+      s/\r?\n$//;
+      chomp;
+      $trim_len = length($orig) - length($_);
+    } else {
+      $trim_len = chomp;
+    }
+
+    my $match_num = 0;
+    my %only_match = my %mark = ();
+    my $keep = -1;
+    $nextfile = 0;
+
+    if ($. == 1) {
+      @before = ();
+      $byte = $after = $last_after = 0;
+
+      # --exclude-dir exists and the current file has a specified directory
+      # (duplicates the logic when determining the file is a directory)
+      if (defined $opt{'exclude-dir'} and $file !~ m"([^/]+)/+[^/]*$") {
+        next FILE if exclude_dir($1);
+      }
+      for (@in_out) {	# --exclude and --exclude-from and --include
+        my $fn = $file =~ s'.*/''gr;
+        if ($fn =~ glob_to_regex(substr($_, 1))) {
+          $keep = substr($_, 0, 1);
+        }
+      }
+      if ($keep == 0 or $keep == -1 and $has_includes) {
+        next FILE;
+      }
+    }
+
+    # check against patterns (unneeded with -l and an existing field match)
+    unless ($opt{'files-with-match'} == 1 and $match_num) {
+      for my $p (sort {$pattern{$a} <=> $pattern{$b}} keys %pattern) {
+        my $pos = 0;
+        while (/\G(.*?)($p)/g) {
+          my $pre = $1; my $m = $2; my $all = $&;
+          my $k = length($pre . $m) - length($all);
+          if ($k > 0) { 	# \K is in use, adjust the variables for it
+            $pre = substr($1 . $2, 0, $k);
+            $m = $all;
+          }
+          $match_num++;
+          if ($opt{'files-with-match'} != -1) {
+            no warnings 'exiting';
+            if ($opt{'files-with-match'} == 0) {
+              next FILE;
+            } else {
+              $exit = 0 unless $exit == 2;
+            }
+            $nextfile = 1;
+            last;
+          }
+          my $c = get_color($pattern{$p});
+
+          # BINARY_FILES note: this would need to change to match GNU grep's
+          # man page as opposed to its actual behavior.
+          # What we do is a little bit between the two since we read one
+          # line at a time and may have already printed matches upon finding
+          # the first null. We'd otherwise have to hold output until each
+          # file is fully checked for null characters, for both `-o` and not.
+
+          if ($opt{'only-matching'}) {
+            $pos += length($pre);
+            my $end_pos = $pos + length($m);
+            push(@{$only_match{$pos}}, $c . $m . $c0);
+            $pos = $end_pos;
+          } elsif ($opt{color}) {
+            $pos += length($pre);
+            # To handle overlapping matches, we cue every CHARACTER separately
+            # (redundant codes are skipped when we print out the line)
+            for (my $max = $pos + length($m); $pos < $max; $pos++) {
+              $mark{$pos} = $c;
+            }
+            # If not already changing color, use the final color or reset
+            $mark{$pos} = ( /.*(\e\[[0-?]*m)/ ? $1 : $c0 ) unless $mark{$pos};
+          # These two lines are only needed for BINARY_FILES by the man page
+          #} else {
+          #  $pos += length($pre . $m);
+          }
+        }
+        exit $opt{'invert-match'} if $opt{quiet} and $match_num;
+      }
+    }
+
+    # Add zero or one if counting lines or else add the number of matches
+    $count += lc $opt{'count-by'} eq 'line' ? $match_num > 0 : $match_num;
+
+    if ($opt{'invert-match'} and $opt{'files-with-match'} == -1
+    or eof and $opt{'files-with-match'} == 0) {
+      $exit = 0 unless $match_num or $exit == 2;
+      $match_num = not $match_num;
+    }
+
+    # We have a match and aren't not counting
+    #   or we have a count and are counting per-file and this file is ending
+    my $found = ($match_num and not $opt{count}
+      or $opt{count} and $opt{'count-by'} =~ /^[lm]/ and eof);
+    # If the above or we're tracking before or after context
+    if ($found or $opt{'before-context'} or $after) {
+      # Set prefix and suffix (before and after)
+      my $pre = my $post = '';
+      my $delim = $found ? ':' : '-';
+      my $fn = $file eq '-' ? $opt{label} : $file;
+
+      if ($found and $opt{'files-with-match'} != -1) {
+        print "$grep_colors{fn}$file$c0\n";
+        next LINE;
+      } elsif ($binary_output) {
+        printf "%s: %s: binary file matches\n", $self, $fn;
+        next FILE;
+      } elsif ($opt{'with-filename'}) {
+        $pre .= "$grep_colors{fn}$fn";
+        if ($opt{null}) {
+          $pre .= "$c0\0";
+        } else {
+          $pre .= "$grep_colors{se}$delim$c0";
+        }
+      }
+      if ($opt{'line-number'}) {
+        # TODO: initial tab: figure out how to get the proper padding for `-T`
+        #       without reading ahead or holding output (how does GNU do it?)
+        #       ... this code simply hard-codes space for six digits
+        my $pad = $opt{'initial-tab'} ? 6 : 1;
+        $pre .= sprintf("$grep_colors{ln}%*s$grep_colors{se}$delim$c0",
+          $pad, $.);
+      }
+      if ($opt{'byte-offset'}) {
+        $pre .= "$grep_colors{bn}$byte$grep_colors{se}$delim$c0";
+      }
+      if ($trim_len > 0) {
+        $post = substr($orig, -$trim_len);  # return orig null/newline (if any)
+      }
+      # TODO: initial tab: this appears to satisfy the docs for GNU's `-T`
+      #       but it does not do *exactly* what GNU grep does...
+      $pre .= "\t" if $opt{'initial-tab'};
+
+
+      if ($opt{'only-matching'}) {
+        $post = "\n";
+        $count++ if %only_match and lc $opt{'count-by'} eq 'line';
+        for my $m (sort { $a <=> $b } %only_match) {
+          for (@{$only_match{$m}}) {  # iterate over multiple hits
+            print $pre . $_ . $post;
+            if (lc $opt{'count-by'} ne 'line') {
+              $count++;
+              if ($opt{max} > 0 and $count >= $opt{max}) {
+                # We hit the maximum count: stop even if we're mid-line
+                exit 0 if $opt{'count-by'} eq 'MATCH';	# max is total
+                $exit = 0 unless $exit == 2;
+                next FILE if $opt{'count-by'} eq 'match';  # max is per-file
+              }
+            }
+          }
+        }
+      } elsif ($opt{count}) {
+        $_ = $opt{'invert-match'} ? $. - $count : $count;
+        next FILE if $_ == 0 and $opt{'count-empty'} == 0;
+      }
+
+      $exit = ($count == 0) unless $exit == 2;
+      next LINE if $opt{'only-matching'};
+
+      # Add colors
+      if ($opt{color}) {
+        my $colored = "";
+        my $i = 0;
+        my $last = '';
+        for my $c (split('', $_)) {
+          # Only print if there is a color code and it's not redundant
+          $colored .= $mark{$i} if $mark{$i} and $mark{$i} ne $last;
+          $last = $mark{$i} // '';
+          $colored .= $c;
+          $i++;
+        }
+        $colored .= "$mark{$i}" if $mark{$i};
+        $_ = $colored;
+      }
+
+      $_ = $pre . $_ . $post;
+      if ($found) {
+        # TODO: add group-separator given -A and not -B
+        # TODO: add group-separator btw files with matches
+        if (@before) {
+          if (not $opt{'no-group-separator'}
+          and $last_after > 0 and $last_after + @before + 1 < $.) {
+            print $grep_colors{se} . $opt{'group-separator'} . $c0 . "\n";
+            $last_after = 0;
+          }
+          print join ('', @before);
+          @before = ();
+        } elsif ($last_after > 0 and $last_after + 1 < $.) {
+          print $grep_colors{se} . $opt{'group-separator'} . $c0 . "\n";
+          $last_after = 0;
+        }
+        print;
+        $after = $opt{'after-context'} // 0;
+        $last_after = $. if $opt{'after-context'};
+      } else {
+        if ($after > 0) {
+          $after--;
+          print;
+          $last_after = $.;
+        }
+        if ($opt{'before-context'}) {
+          push (@before, $_);
+          shift @before if @before > $opt{'before-context'};
+        }
+      }
+      # TODO: fully vet max
+      last LINE if $opt{max} > 0 and $count >= $opt{max} and $after < 1;
+    }
+    $byte += length($raw) if $opt{'byte-offset'};
+  } continue {
+    if (eof or $nextfile) {
+      if ($opt{'count-by'} =~ /^[LM]/) {
+        exit $exit if $opt{max} > 0 and $count >= $opt{max};
+        $count = 0;
+      }
+      close $filehandle;	# next file, reset $. (line number)
+      next FILE;
+      @before = ();
+      $after = $last_after = 0;
+    }
+  }	# end LINE loop
+
+}	# end FILE loop
+
+if ($opt{'count-by'} =~ /^[LM]/) {
+  print "$count\n";
+  $exit = ($count == 0) unless $exit == 2;	# inverted for exit value
+}
+
+exit $exit;
