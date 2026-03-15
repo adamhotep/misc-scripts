@@ -13,8 +13,10 @@ If you're looking for phonetic transliterations, try one of:
     uconv -x "::Latin; ::Latin-ASCII;"
     perl -MText::Unidecode -pe 'use open qw(:std :utf8); $_ = unidecode($_)'
 
+TODO: Handle Combining Diacritical Marks without the final perl call.
+
 Part of misc-scripts: https://github.com/adamhotep/misc-scripts
-utf2ascii 1.0.20251005.0 copyright © 2005+ by Adam Katz <@adamhotep>, GPLv3+
+utf2ascii 1.1.20260208.0 copyright © 2005+ by Adam Katz <@adamhotep>, GPLv3+
 /help
 }
 
@@ -428,5 +430,11 @@ s:\([0-9]\)⅞:\1 7/8:g;  s:\(⅞\):7/8:g;
 s:\([0-9]\)⅑:\1 1/9:g;  s:\(⅑\):1/9:g;
 s:\([0-9]\)⅒:\1 1/10:g; s:\(⅒\):1/10:g;
 
-' "$@"
+' "$@" | { if command -v perl >/dev/null
+    # use perl to decompose combining diacritical marks into letters & accents,
+    # then remove the accents (or just pass through if perl is not installed)
+    then perl -MUnicode::Normalize=NFD -CSD -pe '$_ = NFD($_); s/\p{Mn}//g'
+    else cat
+  fi
+}
 # vim:ambiwidth=double:
