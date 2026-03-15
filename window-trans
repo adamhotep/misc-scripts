@@ -1,0 +1,212 @@
+#!/bin/sh
+help() {
+  parens=
+  if [ "${transset##*/}" != "transset" ]; then
+    if [ -x "$transset" ]
+      then parens=" ($transset)"
+      else parens=' (though x11-apps is not installed)'
+    fi
+  fi
+  cat <</help
+Usage: window-trans [OPTIONS] [OPACITY]
+Set a window's transparency; wraps transset$parens with a better --toggle
+
+  --display=DISPLAY   Use this X11 server (same as \$DISPLAY, default=:0)
+  -t, --toggle        Toggle opacity (CHANGED! detail at --toggle-help)
+  -T, --toggle=up     Like toggle, but upgrade opacity >= 0.999 to 1
+  --toggle-help       Explain how toggling works in this wrapper
+  -c, --click         Select a window to modify by clicking on it (default)
+  -p, --point         Select the window currently under the mouse cursor
+  -a, --actual        Select the active window (use focus)
+  -n, --name=NAME     Select a window by regular expression
+  -R, --no-regex      If selecting by window name, match by exact string
+  -i, --id=ID         Select the window with the given ID
+  --dec, --inc        Decrement/Increment the window by OPACITY, not *to* it
+  -m, --min=MINIMUM   Do not set the window opacity below MINIMUM opacity
+  -x, --max=MAXIMUM   Do not set the window opacity above MAXIMUM opacity
+  -X, --exe=TRANSSET  Run TRANSSET instead of $transset
+  -v, --verbose       Print some debug info
+
+A part of misc-scripts, https://github.com/adamhotep/misc-scripts
+/help
+  version
+}
+version() { cat <</version
+window-trans 0.2.20210109.1 copyright 2021+ by Adam Katz, Apache License 2.0
+/version
+  if [ -x "$transset" ]; then
+    "$transset" --version 2>&1 |awk '{printf s "%s", $0; s=" "} END {print ""}'
+  fi
+}
+
+toggle_help() { cat <</toggle_help
+Opacity is stored as a decimal from 0-1 in millionths, such as 0.987654.
+
+This improved --toggle instead uses this as X.YYYZZZ as follows:
+ * opacity is rounded to the thousandths (even outside of toggling)
+ * --inc & --dec and --max & --min are adjusted to retain saved toggle values
+ * if the current opacity is 1.000000 or 0.999999, it's treated as 0.999250
+ * if the current opacity is above 0.979 and ZZZ==000, ZZZ is 250
+ * if the current opacity is under 0.980 and ZZZ==000, ZZZ is 999
+ * if given an OPACITY, set YYY to it and save the original (as 1000-YYY) in ZZZ
+ * if not given an OPACITY, swap the current (YYY) and saved (ZZZ) opacities
+/toggle_help
+}
+
+die() { printf '%s\n' "$@" >&2; exit 2; }  # complain to STDERR & exit w/ error
+
+# Usage: safe_value VALUE PRINTF_FORMAT
+safe_value() {
+  : "making $1 safe"
+  case "$1" in
+    ( '' )				die "missing value" ;;
+    ( . | *.*.* | *[^0-9.]* )		die "invalid number: $1" ;;
+    ( [2-9]* | 1[0-9]* | 1.*[^0]* )	die "number exceeds 0-1 range" ;;
+    ( * )				printf "${2:-%.3f}" "$1" ;;
+  esac
+}
+
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+transset="$(command -v transset 2>/dev/null || command -v transset-df \
+ || echo '<transset is not installed>')"
+disp= toggle= toggle_opt= click= point= actual= name= no_regex= id=
+inc= dec= verbose= min= max=
+while getopts hd:tTcpan:Ri:m:x:X:vV-: OPT; do
+  if [ "$OPT" = - ]; then # long opt https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#"$OPT"}" OPTARG="${OPTARG#=}"
+  fi
+  case "$OPT" in
+    ( h | help )	help; exit ;;
+    ( d )		if [ "$OPTARG" = isplay ]  # legacy -display blah
+    			  then die 'Use `--display=DISPLAY` or `-d DISPLAY`'
+    			elif [ "$OPTARG" != "${OPTARG#isplay=}" ]
+    			  then disp="${OPTARG#*=}" # ~legacy -display=blah
+    			  else disp="$OPTARG"
+    			fi ;;
+    ( display ) 	needs_arg; disp="$OPTARG" ;;
+    ( tog*help )	toggle_help; exit ;;
+    ( T | tog*up* )	toggle=--toggle; toggle_opt="up" ;;
+    ( t | tog* )	toggle=--toggle; toggle_opt="$OPTARG" ;;
+    ( c | click )	click=--click ;;
+    ( p | point* )	point=--point ;;
+    ( a | act* )	actual=--actual ;;
+    ( n | name* )	needs_arg; name="$OPTARG" ;;
+    ( R | no*regex* )	no_regex=--no-regex ;;
+    ( i | id* ) 	needs_arg; id="$OPTARG" ;;
+    ( inc* )		inc=--inc dec= ;;
+    ( dec* )		dec=--inc inc= ;;
+    ( m | min* )	needs_arg; min="$(safe_value "$OPTARG")" ;;
+    ( x | max* )	needs_arg; max="$(safe_value "$OPTARG")" ;;
+    ( X | exe* )	needs_arg; transset="$OPTARG" ;;
+    ( v | verb* )	verbose=--verbose ;;
+    ( V | ver* )	version; exit ;;
+    ( ??* )		die "Illegal option --$OPT" ;; # bad long option
+    ( ? )		exit 2 ;; # bad short option (error via getopts)
+  esac
+done
+shift $((OPTIND-1))
+
+target="$1"	# the only argument left should be the (optional) target opacity
+
+if ! [ -x "$transset" ]; then
+  die "Could not find transset at \`$transset\`. Is it installed?"
+fi
+
+if [ -n "$min" ]; then
+  min="--min=$min"
+fi
+if [ -n "$max" ]; then
+  if [ "$max" = 1.000 ]; then
+    max=0.999
+  fi
+  max="--max=$max"
+fi
+
+# this intentionally omits dec inc and target
+set -- "$transset" ${disp:+-display "$disp"} $click $point $actual \
+       ${name:+--name "$name"} $no_regex ${id:+--id "$id"} $verbose \
+
+# get the current opacity, from 0.000000 to 1.000000
+opacity=$( "$@" --verbose --inc 0 \
+  |awk '$1$2$3 == "SetPropertyto" { printf "%.6f", $4; exit }'
+)
+current=${opacity#0.}
+case $opacity in
+  ( 0.*000 )	fsaved=999 current=${current%???} ;;
+  ( 0.* )	fsaved=${current#???} current=${current%???} ;;
+  ( * ) 	opacity=0.999250 current=999 fsaved=250 ;;
+esac
+
+flip() { printf %03d $((1000 - ${1#0})); }
+
+saved=$(flip $fsaved)
+
+# $opacity remains the full current opacity, 0.000000-0.999999
+#          (if $opacity was 1.000000, it is now 0.999250, saving a 0.750)
+# $current now holds the current opacity, 000-999 for 0.000-0.999 (1.000 -> 999)
+# $fsaved  now holds the flipped saved opacity, 999-000 for 0.999-0.000
+# $saved   now holds the saved opacity, 000-999 for 0.000-0.999
+
+if [ $saved = $current ]; then
+  : '$saved == $current, replacing $saved with a sensible default'
+  case $current in
+    ( 9[89]? )	saved=750 fsaved=250 ;;  # very highly opaque: 0.750
+    ( * )	saved=999 fsaved=001 ;;  # a bit transparent:  0.999
+  esac
+fi
+
+if [ -n "$target" ]; then
+  target=$(safe_value "$target")
+  if [ $target = 1.000 ]; then
+    target=0.999
+  fi
+else	# no target means toggle
+  toggle=--toggle
+fi
+
+: current="$current" saved="$saved" target="$target"
+
+if [ -z "$toggle" ]; then	# $target is guaranteed here
+  if [ -z "$inc$dec" ]; then
+    target=$target$fsaved
+  fi
+
+  # alter min and max to force retaining the flipped_saved value at its end
+  if [ -n "$min" ]; then
+    set -- "$@" $min$fsaved
+  fi
+  if [ -n "$max" ]; then
+    set -- "$@" $max$fsaved
+  fi
+
+  exec "$@" $inc $dec $target
+  exit $?
+fi
+
+
+######## TOGGLE MODE ########
+
+fcurrent=$(flip $current)
+
+# alter min and max to force retaining the flipped_current value at its end
+if [ -n "$min" ]; then
+  set -- "$@" $min$fcurrent
+fi
+if [ -n "$max" ]; then
+  if [ $max = 1.000 ]; then max=0.999; fi
+  set -- "$@" $max$fcurrent
+fi
+
+if [ -n "$target" ]; then
+  target=$target$fcurrent
+
+elif [ "$toggle_opt" = "up" ] && [ $saved = 999 ]; then
+  target=1
+
+else
+  : no target, swap with saved value
+  target=0.$saved$fcurrent
+fi
+
+exec "$@" $target
