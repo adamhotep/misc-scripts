@@ -1,0 +1,209 @@
+#!/bin/sh
+# This script is a messy pile of posix shell, awk, & perl. TODO: make 100% perl.
+
+help() {	# assemble --help from GNU date's --help plus extras
+
+  echo 'Wrapper for GNU date supporting YYYYMMDD_HHMMSS & Excel (as %J)'
+
+  xls= long=0 self="${0##*/}"
+  if [ "$1" = "--long" ]; then
+    long=1
+    xls="
+Excel does not deal with time zones or daylight savings (DST). Because of that,
+$self makes everything relative to the *current* DST offset.  Converting back
+to a standard date in $self may be an hour off, but it should work in Excel.
+
+$self defaults to OpenOffice dates before 1899/12/31 and Excel afterwords:
+
+  FLAG           NOTES             DAY 1        DAY 59     DAY 60      Day 61
+  (default)      OO then Excel   1899/12/31  1900/02/28  1900/02/28  1900/03/01
+  --excel        Leap year bug   1900/01/01  1900/02/28  1900/02/28  1900/03/01
+  --openoffice                   1899/12/31  1900/02/27  1900/02/28  1900/03/01
+  --1904-dates   Excel for Mac   1904/01/01  1904/02/28  1904/02/29  1904/03/01
+
+Learn more at https://stackoverflow.com/a/32578059/519360"
+  fi
+  date --help 2>&1 |awk -v xls="${xls#?}" -v self="$self" -v long=$long '
+    # respace fixes a spacing oddity in GNU date --help
+    function respace(s) { return index($0, s) && sub(s, "&         ") }
+    /^date: illegal/	{ bsd = 1; next }
+    /(^|[,:$] +)date/	{ sub (/date/, self) }
+    $1 == "FORMAT"	{ if (!long) exit; print xls "\n" }
+    !long && /options/	{ opts = 1 }
+    respace("--help")	{ if (long) { t = "this "; sub(t, "brief ") }
+    			  print
+    			  sub(/help     /, "long-help")
+    			  sub(/brief|this/, t "comprehensive")
+    			}
+    respace("--version") {}
+    !opts || opts && $1 ~ /^-/	{ print }
+    $1 == "%j"	{ sub(/j/, "J"); sub(/ of.*/, "s after 1899/12/30"); print }
+    END 	{ if (bsd) print "\nLearn more about formats: `man strftime`" }
+  '
+  if [ "$1" = "--long" ]; then
+    echo "xdate wrapper home: <https://github.com/adamhotep/misc-scripts>"
+    echo ""
+  else
+    echo ""
+    echo "Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
+  fi
+  echo "xdate 0.2.20231029.2 copyright 2010+ by Adam Katz, GPLv3+"
+  exit
+}
+
+debug() { [ -n "$DEBUG" ] && echo "$*" >&2; }
+
+# special case for -h on its own: treat as --help
+if [ "$*" = "-h" ]; then help; fi
+
+export xls_epoch=0 # calculated on first use since it's only used with -d and -f
+
+# Usage: map_dates [FILE...]
+# Preprocessor for date --file=FILE
+# accept more date formats: YYYYMMDD_HHMMSS, DDDDD.DDD
+map_dates() {
+  # Unix epoch offset of Excel epoch https://stackoverflow.com/a/32578059/519360
+  if [ "$xls_epoch" -ge 0 ]; then
+    # nested call works around Excel's lack of understanding of daylight savings
+    local TZ="$(date +%z)"
+    xls_epoch="$(( xls_epoch + $("$gdate" -d "1899/12/30 00:00:00 $TZ" +%s) ))"
+  fi
+  perl -ne '
+    if (/^[12]\d\d\d[01]\d[0-3]\d_[0-2]\d([0-6]\d([0-6]\d)?)?(\s|$)/) {
+      printf "%04d/%02d/%02d %02d:%02d:%02d\n",
+        substr($_,0,4), substr($_,4,2), substr($_,6,2),
+        substr($_,9,2), substr($_,11,2), substr($_,13);
+    } elsif (2359 < $_ && $_ < 100101 || /^-?[0-9]*\.[0-9]*$/) {
+      $_++ if ($_ >= 0 or $ENV{xls} == 2) and $_ < 60 and $ENV{xls}; # Excel bug
+      printf "@%.0f\n", $ENV{xls_epoch} + $_ * 86400
+    } else { print; }
+  ' "$@"
+}
+
+tes() {
+  if [ "$DEBUG" = 1 ]; then
+    debug 'Arguments to `date` are now:'
+    for d in "$@"; do debug "  $d"; done
+  fi
+}
+
+
+# Since getopts would require specifying EVERY option, just use a primitive loop
+reset= datestr= datefile= xls=1 pid=$$ post= end_of_args="---!End-of-args-$$*$$"
+gdate=date
+
+# includes fake final arg for datestr and datefile cleanup
+for arg in "$@" "$end_of_args"; do
+  debug "HERE looping on <$arg> datestr=<$datestr> datefile=<$datefile>"
+  if [ -z "$reset" ]; then reset=1; set --; tes "$@"; fi
+  if [ "$datestr" = next$pid ]; then
+    debug "set datestr='$arg'"
+    datestr="$arg"
+    continue
+  elif [ "$datefile" = next$pid ]; then
+    debug "set datefile='$arg'"
+    datefile="$arg"
+    continue
+  elif [ "$gdate" = next$pid ]; then
+    debug "set gdate='$arg'"
+    gdate="$arg"
+    continue
+  elif [ "$arg" != "${arg#-*u*[df]}" ]; then # -u doesn't work.  fix with TZ.
+    TZ=UTC
+  fi
+  # TODO: convert whole script to perl so I can use a regex to handle -fabcd.txt
+  case "$arg" in
+    ( "$end_of_args" )		break ;; # fake final arg for above conditionals
+    ( --debug )			DEBUG=1 ;;
+    ( --help )			help ;;
+    ( --long*help* | --help* )	help --long ;;
+    ( --date=?* )		datestr="${arg#*=}" ;;
+    ( --date )			datestr=next$pid ;;
+    ( --file=?* )		datefile="${arg#*=}" ;;
+    ( --file )			datefile=next$pid ;;
+    ( --excel | --xls | --ms )	xls=2 ;;  # use MS Excel bug even before 1900
+    ( --ooo | --[ol]*ffice )	xls=0 ;;  # --openoffice, --libreoffice
+    ( --1904* )			xls_mac=1; xls_epoch=126316800; xls=0 ;;
+    ( --exec=?* )		gdate="${arg#*=}"; debug "set gdate='$gdate'" ;;
+    ( --exec )			gdate=next$pid ;;
+    ( --?* )			set -- "$@" "$arg"; tes "$@" ;;
+    ( -x?* )	gdate="${arg#-x}"; debug "set gdate='$gdate'" ;;
+    ( -*x )	gdate=next$pid
+    		[ "$arg" != -x ] && set -- "$@" "${arg%x}"; tes "$@" ;;
+    ( -*d )	datestr=next$pid     # placeholder for next arg
+    		[ "$arg" != -d ] && set -- "$@" "${arg%d}"; tes "$@" ;;
+    ( -*d* )	datestr="${arg#*d}"
+    		[ "$arg" != "-d$datestr" ] && set -- "$@" "${arg%%d*}"; tes "$@" ;;
+    ( -*f )	datefile=next$pid    # placeholder for next arg
+    		[ "$arg" != -f ] && set -- "$@" "${arg%f}"; tes "$@" ;;
+    ( -*f* )	datefile="${arg#*f}"
+                debug HERE
+    		[ "$arg" != "-f$datefile" ] && set -- "$@" "${arg%%f*}"; tes "$@" ;;
+    ( -*u* )	set -- "$@" "$arg"; tes "$@"; TZ=UTC ;;
+    ( +* )	post="$(echo "$arg" |perl -pe \
+    		  "s/(?<!%)(%(?:[ #+-]*\d*(?:\.\d*)?)?J)/\$1<$pid<%s%z>/g")" ;;
+    ( * )	set -- "$@" "$arg"; tes "$@" ;;
+  esac
+done
+export xls DEBUG xls_mac TZ
+
+if ! "$gdate" -d now >/dev/null 2>&1; then
+  we_have() { command -v "$1" >/dev/null 2>&1; }  # true if we have the command
+  if [ "$gdate" = date ] && we_have gdate && gdate -d now >/dev/null 2>&1; then
+    gdate=gdate
+    debug 'We are now set to use `gdate` (GNU) rather than `date` (BSD?)'
+  else
+    echo "Your \`$gdate\` command is not GNU date.  I refuse to even try." >&2
+    exit 2
+  fi
+fi
+
+if [ "$datefile" = "-" ] || [ -s "$datefile" ]; then
+  tmp="$(mktemp "${TMPDIR:-/tmp}/xdate.${pid}XXXX")"
+  trap "rm -f $tmp" 0 1 2 5 9 11 15 18
+  map_dates "$datefile" > "$tmp"
+  set -- "$@" --file="$tmp"; tes "$@"
+elif [ -n "$datestr" ]; then
+  datestr="$(echo "$datestr" |map_dates)"
+  set -- "$@" -d "$datestr"; tes "$@"
+fi
+
+set -- "$@" ${post:+"$post"}
+
+tes "$@"
+
+"$gdate" "$@" |perl -wpe 'use strict;
+  my $re =
+    qr/(?<!%)%([-_^#]*\d*(?:\.\d*)?[EO]?)?J<'$pid'<(-?\d+)([+-])0?(\d+)(\d\d)>/;
+  if (my @d = /$re/) {
+    my $sign = ($d[2] eq "+" ? 1 : -1);
+    my $J = $d[1]/86400 + 25569 + $sign * ($d[3] + $d[4]/60) / 24;
+
+    if ($ENV{DEBUG}) {
+      print STDERR $_ . qq(1="$d[0]" 2="$d[1]" 3="$d[2]" 4="$d[3]" 5="$d[4]"\n)
+        . "$d[1]/86400 + 25569 + $sign * ($d[3] + $d[4]/60) / 24 = $J\n";
+    }
+
+    # adjust for daylight savings: localtime()[8] = is_dst
+    my @now  = localtime();
+    my @then = localtime($d[1]);
+    $J += ($now[8] - $then[8]) / 24;
+
+    # adjust for Excel bug
+    $J-- if $ENV{xls} and $J < 61 and ($ENV{xls} == 2 or $J > 0);
+
+    $J -= 1462 if $ENV{xls_mac};
+
+    # format as specified
+    if ($d[0] ne "") {
+      $J = sprintf("%".$d[0]."f", $J);
+    } else {
+      $d[0] = ".6";
+      $J = sprintf("%".$d[0]."f", $J);
+      $J =~ s/\.?0+$//;
+    }
+
+    s/$re/$J/g;
+  }
+  '
+
