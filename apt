@@ -1,0 +1,287 @@
+#!/bin/sh
+base="${0##*/}"
+
+help() { cat <</help
+Wrapper for APT to maintain APT/.deb package management
+Usage: $base [options] command
+
+Run without privilege escalation (partial list):
+  commands             See a fuller command list
+  list PACKAGE...      List packages based on package names
+# nonfree [PATTERN...] List/search installed non-free/contrib packages
+  query [PATTERN...]   List/search installed packages by name or section
+  search PATTERN...    Search in package descriptions
+  show PACKAGE...      Show package details
+# showsrc PACKAGE...   Show all source package records for given package(s)
+# policy PACKAGE...    Show package(s) install priorities across repositories
+# changelog PACKAGE... Display changelogs for given package(s)
+# depends PACKAGE...   Show dependencies for given package(s)
+# rdepends PACKAGE...  Show package(s) that depend on given package(s)
+# download PACKAGE...  Download the given binary package(s) to the current dir
+# source PACKAGE...    As ${q1}download$q0 but for source code packages and dirs
+# showauto [GLOB...]   Show auto-installed packages matching given glob(s)
+# showhold [GLOB...]   List packages on hold matching given glob(s)
+# showmanual [GLOB...] Show manually-installed packages matching given glob(s)
+
+Run with ${q1}sudo$q0 for privilege escalation (partial list):
+  install PACKAGE...   Install given package(s)
+  remove PACKAGE...    Uninstall given package(s)
+# purge PACKAGE...     As ${q1}remove$q0 but also remove related config files
+  autoremove           Uninstall all unused packages
+# clean                Clear local package repository
+# autoclean            As ${q1}clean$q0 but only for stale/useless packages
+  update               Update the list of available packages
+# force-update         As ${q1}update$q0 but force it to populate from scratch
+  upgrade              Upgrade the system by installing/upgrading packages
+# dist-upgrade         As ${q1}upgrade$q0 with liberal dependency-changing
+  full-upgrade         As ${q1}upgrade$q0 but also remove old packages as needed
+# edit-sources         Edit the source information file
+# add-repository REPO  Add given repository to /etc/apt/sources.list[.d]
+# key                  Run the APT key management utility.
+#                      Extra: fetches & installs key given ${q1}add keyid$q0
+# auto PACKAGE...      Mark given package(s) as automatically installed
+# manual PACKAGE...    Mark given package(s) as manually installed
+# [un]hold PACKAGE...  Hold or unhold updates for given package(s)
+
+Most commands support ${q1}--help$q0. See also apt(8), apt-get(8), apt-cache(8).
+
+Part of misc-scripts: https://github.com/adamhotep/misc-scripts, GPLv3+
+apt-helper 0.4.20220105.1 copyright 2010+ by Adam Katz (install as ${q1}apt$q0)
+/help
+}
+
+get_help() {
+  if [ "$1" = "full" ]
+    then help |sed 's/^#/ /; /(partial list):$/{s/(partial/(fuller/}'
+    else help |grep -v '^#'
+  fi
+  exit
+}
+
+warn() {
+  case $1 in
+    ( -x ) x="$2"; shift 2 ;;
+    ( -x* ) x="${1#-x}"; shift ;;
+  esac
+  printf "%s\n" "$@" >&2
+  [ -n "$x" ] && exit $x
+}
+
+# true when ALL arguments are valid commands
+we_have() {
+  command -v "$@" >/dev/null 2>&1
+}
+
+try() {
+  if we_have "$1"; then
+    exec $sudo "$@"
+    exit $?
+  else
+    catch "$1"
+  fi
+}
+
+catch() {
+  local cmd="$1"
+  shift
+  warn -x 127 "You do not have the '$cmd' command installed${1+ $*}"
+}
+
+get_exe() {
+  local IFS=":" dir n=0
+  for dir in $PATH; do
+    if ls -ldL "$dir/$base" 2>/dev/null |grep -q '^-[^ ]*[Ssx] '; then
+      n=$((n+1))
+      if [ $n = 2 ]; then
+        echo "$dir/$base"
+        return
+      fi
+    fi
+  done
+}
+
+sudo=
+exe="$(get_exe)"
+
+if ! we_have apt; then
+  apt="apt-cache"
+  get="apt-get"
+elif [ "$base" = apt ]; then
+  apt="$exe"	get="$exe"
+
+  case $1 in	# for READ-ONLY commands via apt (only)
+    ( list )		exec "$exe" "$@" ;;
+  esac
+
+else
+  apt="apt"	get="apt"
+fi
+
+mark="exec apt-mark"
+if ! we_have apt-mark; then
+  _no_apt_mark() {
+    warn -x 2 "You need ${q1}apt-mark$q0 to do $1"
+  }
+  mark="_no_apt_mark"
+fi
+
+# Color support
+if [ -z "$NO_COLOR" ] && [ -t 1 -o -n "$CLICOLOR_FORCE" ]; then
+  cb1='[1m'	cb0='[0m'	# colors (color bold on, color bold off)
+  q1="[32m\`"	q0="\`$cb0"
+else
+  cb1=''	cb0=''
+  q1='`'	q0='`'
+fi
+
+query() {
+  local arg nf=0 tmp=1 pkg=^ sect=^ fmt='${Section}\t${Package}\t${Version}\n'
+  # can't use `try` in this because its exit would get lost by the pipe
+  if ! we_have dpkg-query; then catch dpkg-query; fi
+  for arg in "$@"; do
+    if [ 1 = "$tmp" ]; then tmp=; set --; fi	# hack to reset the arg list
+    if [ "$fmt"  = next.$$ ]; then fmt="$arg";  continue; fi
+    if [ "$pkg"  = next.$$ ]; then pkg="$arg";  continue; fi
+    if [ "$sect" = next.$$ ]; then sect="$arg"; continue; fi
+    case "$arg" in
+      ( --nonfree )		sect='non.?free|contrib' nf=1 ;;
+      ( -f | --showformat )	fmt=next.$$ ;;
+      ( -f=?*|--showformat=?* )	fmt="${arg#*=}" ;;
+      ( -P=?* | --pack*=?* )	pkg="${arg#*=}" ;;
+      ( -P | --pack* )		pkg=next.$$ ;;
+      ( -s=?* | --sect*=?* )		sect="${arg#*=}" ;;
+      ( -s | --sect* )		sect=next.$$ ;;
+      ( -h | --help )
+        if [ 1 = $nf ]; then tmp=" in the non-free/contib package section"; fi
+        echo "Query the dpkg database$tmp"
+        dpkg-query --help |awk -v me="$base" -v nf=$nf -v sect="$sect" -vq="'" '
+          $1 == "Usage:" {
+            $2 = me " query"
+            print
+            $1 = "      "
+            $2 = me " nonfree"
+          }
+          $1 == "-s," || $1 == "-s" {	# remove -s
+            sub(/-s../, "")
+            sub(/\]/, "]    ")
+          }
+          cmd_list == 1 {
+            print
+            cmd_list = match($0, /[ \t][A-Z][a-z]/)
+            ere = "with an extended regex"
+            printf "  %-*s%s%s\n", cmd_list - 2,
+                   "-P, --package=<pattern>", "Search package names", ere
+            printf "  %-*s%s%s\n", cmd_list - 2,
+                   "-s, --section=<pattern>", "Search section", ere ";"
+            $0 = sprintf("  %-*s%s", cmd_list - 2,
+                   "",   "`apt nonfree` defaults to `non.?free|contrib`")
+          }
+          $0 == "Commands:" { cmd_list = 1; }
+          $1 ~ /--showformat=<format>/ {
+            $0 = sprintf("%s\n%*s%s\n", $0, match($0, $2)-1, "",
+                   "Must begin with `${Section}\\t${Package}\\t`")
+          }
+          { print }'
+        exit
+        ;;
+      ( * )	set -- "$@" "$arg" ;;
+    esac
+  done
+  {
+    echo "$fmt" |tr '[a-z]' '[A-Z]' \
+      |sed 's/[^A-Z0-9-][^A-Z0-9-]*/	/g; s/^	*//'
+    dpkg-query -f="$fmt" --show "$@"
+  } |awk -F'\t' -v sect="$sect" -v pkg="$pkg" -v cb1="$cb1" -v cb0="$cb0" '
+    NR == 1 { for (f=1; f<=NF; f++) { out[0,f] = $f; max[f] = length($f) } }
+    $1 ~ sect && $2 ~ pkg {
+      hit++
+      last = NF
+      for (f=1; f<=last; f++) {
+        out[hit,f] = $f
+        len = length($f)
+        if (max[f] < len) max[f] = len
+      }
+    }
+    END {
+      if (hit == 0) { exit 1; }  	# no hits: return error
+      for (h=0; h<=hit; h++) {
+        if (h==0 && cb1) printf "%s", cb1
+        for (f=1; f<last; f++) {
+          printf "%-*s  ", max[f], out[h,f]
+        }
+        print out[h,last]
+        if (h==0 && cb1) printf "%s", cb0
+      }
+    }
+  '
+  exit $?
+}
+
+# Remaining READ-ONLY (non-root) commands
+case $1 in
+  ( commands )		get_help full ;;
+  ( file )		shift; try apt-file search "$@" ;;
+  ( file-* )		cmd="$1"; shift; try apt-file "${cmd#file-}" "$@" ;;
+  ( force-update )	fu=true; shift; set -- update ${1+"$@"} ;;
+  ( query )		"$@" ;;
+  ( nonfree|non-free )	shift; query --nonfree "$@" ;;
+  ( *help | -h )	get_help ;;
+  ( popcon )		try apt-"$@" ;;
+  ( showauto|showhold|showmanual )			$mark "$@" ;;
+  ( depends|policy|rdepends|search|show*|source )	exec "$apt" "$@" ;;
+  ( stats|dump*|unmet|pkgnames|dotty|xvcg|madison )	exec apt-cache "$@" ;;
+  # generous allowances for 'search' typos since queries don't tab-complete
+  ( sea*|sera*|saer*|sar[ch]*|ser[ch]* )  shift; exec "$apt" search "$@" ;;
+esac
+
+if [ "$UID" != 0 ]; then
+  echo   "Root privileges needed to run '${exe##*/} $*'"
+  printf "Run as 'sudo ${exe##*/} $*'${fu+ after purging cached lists} [Yn]? "
+  read yn
+  if [ "$yn" = "${yn#[nN]}" ]; then
+    sudo=sudo
+  fi
+fi
+
+# force-update: purge existing repository lists (why, what else could FU mean?)
+if [ -n "$fu" ]; then
+  $sudo rm -rf /var/lib/apt/lists
+  $sudo "$get" autoclean
+fi
+
+# Commands to run as root:
+
+# Extra functionality for `apt key add <keyid>`
+# TODO: update/remove since this is obsolete now, see
+# https://www.linuxuprising.com/2021/01/apt-key-is-deprecated-how-to-add.html
+if [ "${*#key add }" != "${*#key * add }" ]; then
+  keyid="${*##* add }"		# safe because keyids can't have spaces in them
+  keyid="${keyid#0[Xx]}"	# strip hex indicator if present
+  # it's a hexadecimal value and it's not a file/directory
+  if [ "$keyid" = "${keyid#*[^0-9A-Fa-f]}" ] && ! [ -e "$keyid" ]; then
+    shift	# remove 'key' command
+    reset_opts=1
+    for opt in "$@"; do
+      if [ "$reset_opts" = 1 ]; then unset reset_opts; set --; fi
+      if [ "$opt" = add ]; then
+        exec $sudo apt-key "$@" adv --fetch-keys \
+          "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x$keyid"
+      fi
+      set -- "$@" "$opt"
+    done
+  fi
+fi
+
+# prep for apt-mark as root
+if [ "$mark" != "_no_apt_mark" ]; then
+  mark="exec sudo apt-mark"
+fi
+
+case $1 in
+  ( add-repo* )		shift; try add-apt-repository "$@" ;;
+  ( gencaches )		exec $sudo apt-cache "$@" ;;
+  ( key )		shift; exec $sudo apt-key "$@" ;;
+  ( auto|manual|hold|unhold )	$mark "$@" ;;
+  ( * )			exec $sudo "$exe" "$@"
+esac
+
