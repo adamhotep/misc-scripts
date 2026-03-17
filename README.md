@@ -52,6 +52,9 @@ Show notes on vim swap files.
 ## lsps
 List entire ownership hierarchy of given process(es) from top to bottom.
 
+## md2confluence
+A basic (and only somewhat complete) converter of markdown to Atlassian Confluence wiki formatting.
+
 ## namegen
 Generate a block of randomly-generated names, excluding dictionary matches. Good for creating pronounceable number-free usernames.
 

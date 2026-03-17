@@ -1,0 +1,91 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use Text::Tabs 'expand';
+
+sub help { print <<end_help
+Convert Markdown to the Atlassian Confluence wiki format.
+Usage: md2confluence [FILE...]
+
+This is NOT a comprehensive translation. It's merely "good enough".
+The Confluence wiki format is abysmal. Ask Atlassian for a reverse converter.
+
+A part of misc-scripts, https://github.com/adamhotep/misc-scripts
+md2confluence 0.2.20240630.0 Copyright 2024+ by Adam Katz, GPLv2+ / Apache 2.0
+end_help
+}
+
+sub slurp {
+  local $/;
+  return <>;
+}
+
+if (@ARGV and ($ARGV[0] eq "-h" or $ARGV[0] eq "--help")) {
+  help();
+  exit;
+}
+
+$_ = slurp();
+
+s/\r+\n?/\n/g;		# Dos2Unix: CRLF -> LF
+$_ = expand($_);	# expand tabs to spaces
+s/[\001-\006]+//g;	# reserved characters for temporary values
+
+my $strong = "\001";	# temporary stand-in for strong
+
+## inline items (these do NOT support mult-line even though markdown does)
+
+# links:   [text](target title)   ->   [text|target]   (discards optional title)
+s/\[([^\]\n]+)\]\(([^)\s]+)(?:\s[^\)\n]*)?\)/[$1|$2]/mg;
+
+# strong (bold) via underscores:   __text__   ->   *text*
+s/((?:__)+)(.*)\1/$strong$2$strong/g;
+
+# emphasis (italics) via asterisks:   *text*   ->   _text_
+s/(?<![*\\])\*([^*\s\n][^*\n]+)\*(?!\*)/_$1_/mg;
+
+# strong (bold) via asterisks:   **text**   ->   *text*
+s/((?:\*\*|$strong)+)([^*\s\n][^*\n]+)\1/*$2*/mg;
+
+# emphasis + strong (italics + bold) via asterisks:   ***text***   ->   *_text_*
+s/\*\*([^*\s\n][^*\n]+)\*\*/*_$1_*/mg;
+
+# inline code via backticks:    `text`   ->   {{text}}
+s/(?<!\\)((?:\\\\)*)(?<!`)(`+)([^\n]+?)(?<!`)\2(?!`)/$1\{{$3}}/g;
+
+
+## block items
+
+# code blocks via backtick fencing:   ```language   ->   {code:language}
+s/^```(?:[^\S\n]?(\S+).*)?$/
+  "{code" . ($1 ? ":$1" : "") . "}"
+/mge;
+
+# ATX headings via pounds:   ## text   ->   h2. text
+s/^(#{1,6})\s*((?<!#).*?)(?<=\S)\s*(?:#+\s*)?$/
+  "h" . length($1) . ". " . $2
+/mge;
+
+# Setext headings via hyphen/equals:   text\n===   ->   h1. text
+# TODO: allow multi-line content
+s/^(?! {4})([^\n]*)\n(?! {4})([=-])\2*[^\S\n]*$/
+  "h" . ($2 eq '=' ? "1" : "2") . ". " . $1
+/mge;
+
+# quotes via right-angle bracket:   > text   ->   {quote}text{quote}
+s/^(>[\s>]*?)\s*([^\n]*(?:\n(?! *$)[^\n]+)*)/
+  '{quote}' . $2 =~ s,^$1,,gmr . '{quote}'
+/mge;
+
+# numbered lists via number dot:   1. text   ->   # text
+s/^ ?[0-9]+\.(?= +\S)/#/mg;
+
+# unordered lists via hyphen:   - text   ->   * text
+s/^ ?-(?= +\S)/* /mg;
+
+# indented lists (more levels would require maintaining state)
+s/^ {2,3}[*-](?= +\S)/**/mg;		# \n  * text   ->   ** text
+s/^ {2,3}[0-9]+\.(?= +\S)/##/mg;	# \n  1. text   ->   ## text
+
+print;
