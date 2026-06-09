@@ -1,11 +1,11 @@
 #!/usr/bin/perl
 # This script is released under the GNU GPL 2+, copyright (c) 2005+ by Adam Katz
-# see timecalc_help function below for description
+# See the timecalc_help function below for description
 use strict;
 use warnings;
 
 my $tcPROGRAM = "timecalc";
-my $tcVERSION = "0.6.20251205.0";
+my $tcVERSION = "0.7.20260607.0";
 sub timecalc_usage { return "Usage: $tcPROGRAM [OPTIONS] [TIME|SECONDS]..."; }
 
 my $min = 60; my $hour = 60*$min; my $day = 24*$hour; my $year = 365*$day;
@@ -19,9 +19,12 @@ sub timecalc_help {
   SECONDS  A number of seconds
   <STDIN>  If run without arguments, lines from standard input are used instead
   OPTIONS
-    --time    Output colon-delimited time regardless of input
+    --human   Output the time with human-readable units
     --seconds Output time in seconds regardless of input
-  Units indicate smallest value; 3h & 3:00m & 3:00:00 will all return 10800
+    --time    Output colon-delimited time regardless of input
+
+Units indicate smallest value; 3h & 3:00m & 3:00:00 will all return 10800.
+Yes, you can hack this to do conversions for you, like 85:3.1m (3d 13h 3m 6s).
 
 Returns: opposite of argument (TIME->SECONDS, SECONDS->TIME)
 Valid Range:  0-2147483647 or 0-68:35:03:14:07 (assuming 32bit limit)
@@ -46,6 +49,7 @@ sub test_timecalc {
   my ($value, $answer, $option) = @_;
   my $result = timecalc($value, $option // "");
   if ($result =~ /^$answer$/) { return 1; }
+  $value .= " (as $option)" if $option;
   print STDERR "Test of $value failed. Computed $result, should be $answer.\n";
   return 0;
 }
@@ -65,12 +69,15 @@ sub timecalc_testsuite {
      * test_timecalc("-1:4:93", "-" . timecalc("1:4:93"))
      * test_timecalc(-126410465, "-4:3:02:01:05")
      * test_timecalc("65.5h", "235800")
-     * test_timecalc("65:30m", "235800")
-     * test_timecalc("5595", "5595", "-s")
-     * test_timecalc("55:95", "56:35", "-t")
-     * test_timecalc("55:95m", "2:08:35:00", "-t")
-     * test_timecalc("5595", "1:33:15", "--time")
+     * test_timecalc("65h30m", "235800")
+     * test_timecalc("5595", "5595", "seconds")
+     * test_timecalc("55:95", "56:35", "time")
+     * test_timecalc("55h95m", "203700")
+     * test_timecalc("55h95m", "2:08:35:00", "time")
+     * test_timecalc("5595", "1:33:15", "time")
      * test_timecalc("18305.5", "5:05:05.5")
+     * test_timecalc("12w 12:34:56", "7302896")
+     * test_timecalc("12y 12:34", "378477240")
   ) { print "All tests completed successfully.\n"; exit 0; }
   else { print "At least one test failed.\n"; exit 1; }
 }
@@ -85,29 +92,44 @@ sub timecalc_err {
   print STDERR "Try `$tcPROGRAM --help' for more information.\n";
 }
 
+# There are sooo many ways to represent a number. This gets most (in radix 10).
+my $num_re = '(?= \.? [0-9] ) [0-9]* (?: \. [0-9]* )? (?: [Ee] [+-]? [0-9]+ )?';
 
-sub timecalc_units {
-  my ($time, $multiplier) = @_;
-  my $unit = $time; $unit =~ s/^.*(.$)/$1/;
-  $time =~ s/^(.*).$/$1/;
+sub human2time {
+  $_ = shift @_;
 
-  # switch on unit
-    ($unit =~ /y/i) ? $multiplier = $year
-  : ($unit =~ /w/i) ? $multiplier = ($day*7)  # buggy easter-egg
-  : ($unit =~ /d/i) ? $multiplier = $day
-  : ($unit =~ /h/i) ? $multiplier = $hour
-  : ($unit =~ /m/i) ? $multiplier = $min
-  : ($unit =~ /s/i) ? 1  # default is seconds, no need for multiplier
-  : print STDERR "ignoring unknown unit `$unit'\n";
-  return ($time, $multiplier);
+  # collapse weeks into days
+  s@ ( $num_re ) ( \s* ) w (?: ( $num_re ) \s* d )?
+   @ ( ($3 // 0) + $1 * 7) . $2 . "d"
+   @ex;
+
+  # allow for colon-delimited H:M or H:M:S
+  s@ ( [yd] \s* $num_re ) : ( $num_re ) (?: : ( $num_re ) )? \s* $
+   @ sprintf("%sh%sm%ss", $1, $2, $3 // 0)
+   @ixe;
+
+  @_ = m@
+    ^
+    \s*+
+    (?= \S )
+    (?: ( $num_re ) \s* y \s* )?
+    (?: ( $num_re ) \s* d \s* )?
+    (?: ( $num_re ) \s* h \s* )?
+    (?: ( $num_re ) \s* m \s* )?
+    (?: ( $num_re ) \s* s \s* )?
+    $
+  @ix;
+  return $_ unless @_;
+  $_ = join(":", map { $_ // "0" } @_);
+  s/^[0:]+//;	# strip leading zeroed fields
+  return $_;
 }
 
 sub time2sec {
-  my ($time, $multiplier) = @_;
+  my ($time) = @_;
   my $temp = $time;
   $time = 0;
   foreach my $field (1, $min, $hour, $day, $year) {
-    if ($multiplier > $field) { next; } # skip units below the one specified
     $_ = $temp;
     s/.*?([^:]+)$/$1/;
     $temp =~ s/^(.*?):?[^:]+$/$1/;
@@ -118,63 +140,72 @@ sub time2sec {
 }
 
 sub sec2time {
-  my ($time, $multiplier) = @_;
-  $time = $time * $multiplier;	# use specified units
+  my ($time, $option) = @_;
   my ($years, $days, $hours, $mins, $secs);
   $time -= $year * ($years = int ($time/$year));
   $time -= $day  * ($days  = int ($time/$day));
   $time -= $hour * ($hours = int ($time/$hour));
   $time -= $min  * ($mins  = int ($time/$min));
-  $time = sprintf("%d:%d:%02d:%02d:%06.3f",
-    $years, $days, $hours, $mins, $time);
-  $time =~ s/^[0:]*(.+:.+?)\.?0*$/$1/;	# remove lead zeros, tail zeros
+  my $template = "%d:%d:%02d:%02d:%06.3f";
+  if ($option eq "human") { $template = "%dy %dd %dh %dm %.3f"; } # add s later
+  $time = sprintf($template, $years, $days, $hours, $mins, $time);
+  $time =~ s/^[0:ydhm ]*(.+[:ydhm ].+?)\.?0*$/$1/;  # remove lead & tail zeros
+  if ($option eq "human") {
+    $time .= "s" if $time =~ /[0-9]$/;
+    $time =~ s/(?<![0-9])[0dhms ]+$//;	# remove trailing empty units
+  }
   return $time;
 }
 
 # timecalc: string|number [time|seconds] -> number|string
 # Convert a colon-separated time to its value in seconds or vice-versa, units ok
 sub timecalc {
-  my $OUTPUT = "";
+  my $output = "";
   my $time = shift;
   my $option = shift // "";
 
   # Accept -t/--time and -s/--seconds to force the output
-  if ($option eq "time")	{ $OUTPUT = "time"; }
-  elsif ($option eq "seconds")	{ $OUTPUT = "seconds"; }
+  if ($option eq "human")	{ $output = "time"; }
+  elsif ($option eq "time")	{ $output = "time"; }
+  elsif ($option eq "seconds")	{ $output = "seconds"; }
   elsif ($option ne "") 	{ die "invalid option $option\n"; }
 
   # use the first line of input if no data was passed from the command line
   if ($time eq "") { $time = <STDIN>; }
 
-  my $multiplier = 1;  # units/second, default unit is seconds
   my $neg = "";
 
   # negative values are noted, removed, and prepended to end result
   if ($time =~ /^-[0-9]/) { $neg="-"; $time =~ s/^-(.*)$/$1/; }
 
-  # only operate on valid input
-  if ($time =~ /^[0-9:.]+[ywdhms]?$/i) {
+  # support mixes of named units and colon-delimited predecessors
+  $time =~ s/ : ( $num_re \s* s ) /m$1/x;
+  $time =~ s/ : ( $num_re \s* m ) /h$1/x;
+  $time =~ s/ : ( $num_re \s* h ) /d$1/x;
+  $time =~ s/ : ( $num_re \s* d ) /y$1/x;
 
-    # UNITS
-    if ($time =~ /[a-zA-Z]$/) {
-      ($time, $multiplier) = timecalc_units($time, $multiplier);
-    }
-
-    # TIME -> SECONDS
-    if ($multiplier > 1 || $time =~ /:/) {
-      $time = time2sec($time, $multiplier);
-      $time = sec2time($time, 1) if $OUTPUT =~ /time/;  # --time forced
-    }
-
-    # SECONDS -> TIME
-    elsif ($time =~ /^[0-9.]*$/) {
-      $time = sec2time($time, $multiplier);
-      $time = time2sec($time, 1) if $OUTPUT =~ /seconds/;  # --seconds forced
-    }
-
+  # HUMAN -> TIME
+  my $orig_time = $time;
+  $time = human2time($time);	# direct mapping (not cleaned yet)
+  if ($orig_time ne $time and $option ne "") {
+    if ($orig_time =~ /[ydhm][0-9]/) { $output ||= "seconds" }
+    else { $output ||= "time" }
   }
+
+  # TIME -> SECONDS
+  if ($time =~ / ^ $num_re (?: : $num_re )+ $ /x) {
+    $time = time2sec($time);
+    $time = sec2time($time, $option) if $output =~ /time/;  # --time forced
+  }
+
+  # SECONDS -> TIME
+  elsif ($time =~ / ^ $num_re $ /x) {
+    $time = sec2time($time, $option);
+    $time = time2sec($time) if $output =~ /seconds/;  # --seconds forced
+  }
+
   # INVALID INPUT
-  else { timecalc_err($time); exit 1; }
+  else { return undef; }
 
   return "$neg$time";
 }
@@ -187,15 +218,19 @@ sub timecalc {
 use Getopt::Long qw(:config no_ignore_case bundling);
 my %opt = ();
 my $o = "";
-GetOptions(\%opt, qw/ help|h version|ver|V|v seconds|s test time|t /);
+if (-t 0 and @ARGV == 1 and $ARGV[0] eq "-h") { timecalc_help(); exit 0; }
+GetOptions(\%opt, qw/ help version|ver|V|v human|h seconds|s test time|t /);
 if ($opt{help}) 	{ timecalc_help();	exit 0; }
 if ($opt{version})	{ timecalc_version();	exit 0; }
+if ($opt{test}) 	{ timecalc_testsuite();	exit 0; }
 
+if ($opt{human})	{ $o = "human"; }
 if ($opt{seconds})	{ $o = "seconds"; }
 if ($opt{time}) 	{ $o = "time"; }
-if ($opt{test}) 	{ timecalc_testsuite();	exit 0; }
 
 $tcPROGRAM = $0 =~ s/.*\///r;
 for (@ARGV ? @ARGV : <>) {
-  print timecalc($_, $o) . "\n";
+  my $time = timecalc($_, $o);
+  if (defined $time) { print "$time\n"; }
+  else { timecalc_err($_); exit 1; }
 }
