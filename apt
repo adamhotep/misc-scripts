@@ -46,7 +46,7 @@ Run with ${q1}sudo$q0 for privilege escalation (partial list):
 Most commands support ${q1}--help$q0. See also apt(8), apt-get(8), apt-cache(8).
 
 Part of misc-scripts: https://github.com/adamhotep/misc-scripts, GPLv3+
-apt-helper 0.4.20260627.0 copyright 2010+ by Adam Katz (install as ${q1}apt$q0)
+apt-helper 0.4.20260627.1 copyright 2010+ by Adam Katz (install as ${q1}apt$q0)
 /help
 }
 
@@ -237,8 +237,9 @@ esac
 buffer=30	# age in minutes to assume the APT records are up to date
 cache="/var/cache/apt/pkgcache.bin"
 if [ "$1" = update ] && [ "$fu" != true ] \
-&& [ -n "$(find "$cache" -mmin -$buffer)" ] \
-&& [ -z "$(find /etc/apt/sources.list* -type f -mmin -$buffer)" ]; then
+&& [ -n "$(find "$cache" -mmin -$buffer 2>/dev/null)" ] \
+&& [ -z "$(find /etc/apt/sources.list* -type f -mmin -$buffer 2>/dev/null)" ]
+then
   when=$(stat -c %y "$cache")
   echo "APT last updated at ${when%:*}, skipping update"
   exit
