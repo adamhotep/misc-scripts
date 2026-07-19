@@ -11,8 +11,8 @@ Usage: md2confluence [FILE...]
 This is NOT a comprehensive translation. It's merely "good enough".
 The Confluence wiki format is abysmal. Ask Atlassian for a reverse converter.
 
-A part of misc-scripts, https://github.com/adamhotep/misc-scripts
-md2confluence 0.2.20240630.0 Copyright 2024+ by Adam Katz, GPLv2+ / Apache 2.0
+Part of misc-scripts, https://github.com/adamhotep/misc-scripts
+md2confluence 0.2.20240630.1 copyright 2024+ by Adam Katz, GPLv3+ / Apache 2.0
 end_help
 }
 

@@ -40,8 +40,8 @@ version() {
   if [ -n "$v" ]; then
     echo "$v"
   fi
-  echo "Part of misc-scripts: https://github/adamhotep/misc-scripts"
-  echo "hd-wrapper 2.1.20250528.0 Copyright 2005+ by Adam Katz," \
+  echo "Part of misc-scripts, https://github/adamhotep/misc-scripts"
+  echo "hd-wrapper 2.1.20250528.1 copyright 2005+ by Adam Katz," \
        "GPLv3+ / BSD 2-clause"
   exit
 }

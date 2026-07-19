@@ -28,8 +28,8 @@ Print the first and final ten lines of each FILE to standard output
 git="https://github.com/adamhotep/misc-scripts"
 
 version() {
-  echo "Part of misc-scripts: $git"
-  echo "arms 0.5.20240807.0 copyright 2003+ by Adam Katz, GPL v2+"
+  echo "Part of misc-scripts, $git"
+  echo "arms 0.5.20240807.1 copyright 2003+ by Adam Katz, GPLv3+"
   exit
 }
 

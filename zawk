@@ -30,8 +30,9 @@ BUG3: GNU/gawk's \`nextfile\` and other file-specific extensions won't work.
 version() {
   echo "Wraps awk ($("$awk" --version 2>/dev/null |grep -m1 '[0-9]' \
     || echo "'$awk' does not appear to report its own version"))"
-  echo "Part of misc-scripts: https://github/adamhotep/misc-scripts"
-  echo "zawk 0.4.20260315.0 Copyright 2010+ by Adam Katz, Apache License 2.0"
+  echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "zawk 0.4.20260315.1 copyright 2010+ by Adam Katz," \
+    "GPLv3+ / Apache License 2.0"
   exit
 }
 

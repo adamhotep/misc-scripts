@@ -15,7 +15,7 @@ Usage: ${0##*/} [OPTIONS] MESSAGE
 
 version() {
   echo "Part of misc-scripts: https://github/adamhotep/misc-scripts"
-  echo "alert 0.7.20240810.1 copyright 2005+ by Adam Katz, GPL v2+"
+  echo "alert 0.7.20240810.2 copyright 2005+ by Adam Katz, GPLv3+"
   exit
 }
 

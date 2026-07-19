@@ -20,8 +20,8 @@ Usage: apt-popcon [options] pattern [pattern...]
 }
 
 version() {
-  echo "A part of misc-scripts, https://github.com/adamhotep/misc-scripts"
-  echo "apt-popcon 0.5.20240806.0 copyright 2010+ by Adam Katz, GPLv3+"
+  echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "apt-popcon 0.5.20240806.1 copyright 2010+ by Adam Katz, GPLv3+"
   exit
 }
 

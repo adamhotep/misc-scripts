@@ -60,9 +60,9 @@ Learn more at https://stackoverflow.com/a/32578059/519360"
     echo ""
   else
     echo ""
-    echo "Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
+    echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
   fi
-  echo "xdate 0.3.20260315.0 copyright 2010+ by Adam Katz, GPLv3+"
+  echo "xdate 0.3.20260315.1 copyright 2010+ by Adam Katz, GPLv3+"
   exit
 }
 

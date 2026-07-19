@@ -27,16 +27,19 @@ Set a window's transparency; wraps transset$parens with a better --toggle
   -X, --exe=TRANSSET  Run TRANSSET instead of $transset
   -v, --verbose       Print some debug info
 
-A part of misc-scripts, https://github.com/adamhotep/misc-scripts
 /help
   version
 }
-version() { cat <</version
-window-trans 0.2.20210109.1 copyright 2021+ by Adam Katz, Apache License 2.0
-/version
+version() {
   if [ -x "$transset" ]; then
-    "$transset" --version 2>&1 |awk '{printf s "%s", $0; s=" "} END {print ""}'
+    v=$("$transset" --version 2>&1)
   fi
+  echo Wraps ${v:-"transset from x11-apps (not installed)"}
+  cat <</version
+Part of misc-scripts, https://github.com/adamhotep/misc-scripts
+window-trans 0.2.20210109.2 copyright 2021+ by Adam Katz, Apache License 2.0
+/version
+  exit
 }
 
 toggle_help() { cat <</toggle_help
@@ -77,7 +80,7 @@ while getopts hd:tTcpan:Ri:m:x:X:vV-: OPT; do
     OPT="${OPTARG%%=*}" OPTARG="${OPTARG#"$OPT"}" OPTARG="${OPTARG#=}"
   fi
   case "$OPT" in
-    ( h | help )	help; exit ;;
+    ( h | help )	help ;;
     ( d )		if [ "$OPTARG" = isplay ]  # legacy -display blah
     			  then die 'Use `--display=DISPLAY` or `-d DISPLAY`'
     			elif [ "$OPTARG" != "${OPTARG#isplay=}" ]
@@ -100,7 +103,7 @@ while getopts hd:tTcpan:Ri:m:x:X:vV-: OPT; do
     ( x | max* )	needs_arg; max="$(safe_value "$OPTARG")" ;;
     ( X | exe* )	needs_arg; transset="$OPTARG" ;;
     ( v | verb* )	verbose=--verbose ;;
-    ( V | ver* )	version; exit ;;
+    ( V | ver* )	version ;;
     ( ??* )		die "Illegal option --$OPT" ;; # bad long option
     ( ? )		exit 2 ;; # bad short option (error via getopts)
   esac

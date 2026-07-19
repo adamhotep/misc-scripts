@@ -25,8 +25,8 @@ help() {
 }
 
 version() {
-  echo "Part of misc-scripts: https://github.com/adamhotep/misc-scripts"
-  echo "waitx 2.1.20240806.0 copyright 2004+ by Adam Katz <@adamhotep>, GPLv3+"
+  echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "waitx 2.1.20240806.1 copyright 2004+ by Adam Katz, GPLv3+"
   exit
 }
 
@@ -84,8 +84,8 @@ while getopts fF:g:G:hinoO:P:qr:s:t:u:U:vVw:x:-: OPT; do
     ( V | ver* )	get_version=1 ;;
     ( w | wait | poll )	needs_arg; wait_time="$OPTARG" ;;
     ( x | exact )	save_arg "--exact" ;;
-    ( ??* )		die "Illegal option --$OPT" ;;  # bad long option
-    ( ? )		exit 2 ;;  # bad short option (error via getopts)
+    ( \? )		exit 2 ;;  # bad short option (error via getopts)
+    ( * )		die "Illegal option --$OPT" ;;  # bad long option
   esac
 done
 shift $((OPTIND-1))

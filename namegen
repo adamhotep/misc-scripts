@@ -20,8 +20,8 @@ version $1
 }
 
 version() {
-  echo "A part of misc-scripts, https://github.com/adamhotep/misc-scripts"
-  echo "namegen 0.6.20200827.1 copyright 2005+ by Adam Katz, GPLv3+"
+  echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "namegen 0.6.20200827.2 copyright 2005+ by Adam Katz, GPLv3+"
   exit $1
 }
 

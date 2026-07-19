@@ -9,8 +9,8 @@ Show an abridged version of the given input(s)
   version
 }
 version() {
-  echo "abridge 0.4.20191121 copyright 2016+ by Adam Katz, GPL v2+"
-  echo "https://github.com/adamhotep/misc-scripts"
+  echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "abridge 0.4.20191121.1 copyright 2016+ by Adam Katz, GPLv3+"
   exit
 }
 

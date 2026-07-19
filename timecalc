@@ -1,11 +1,11 @@
 #!/usr/bin/perl
-# This script is released under the GNU GPL 2+, copyright (c) 2005+ by Adam Katz
+# This script is released under the GNU GPL 3+, copyright (c) 2005+ by Adam Katz
 # See the timecalc_help function below for description
 use strict;
 use warnings;
 
 my $tcPROGRAM = "timecalc";
-my $tcVERSION = "0.7.20260607.0";
+my $tcVERSION = "0.7.20260607.1";
 sub timecalc_usage { return "Usage: $tcPROGRAM [OPTIONS] [TIME|SECONDS]..."; }
 
 my $min = 60; my $hour = 60*$min; my $day = 24*$hour; my $year = 365*$day;
@@ -36,8 +36,8 @@ Valid Range:  0-2147483647 or 0-68:35:03:14:07 (assuming 32bit limit)
 }
 
 sub timecalc_version {
-  print "Part of misc-scripts: https://github.com/adamhotep/misc-scripts\n";
-  print "$tcPROGRAM $tcVERSION, Copyright 2005+ by Adam Katz, GPLv2+\n";
+  print "Part of misc-scripts, https://github.com/adamhotep/misc-scripts\n";
+  print "$tcPROGRAM $tcVERSION copyright 2005+ by Adam Katz, GPLv3+\n";
   exit 0;
 }
 

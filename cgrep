@@ -145,8 +145,8 @@ Context control:
 }
 
 sub do_version {
-  print "Part of misc-scripts: https://github.com/adamhotep/misc-scripts\n";
-  print "cgrep 0.1.20250101.0 Copyright 2024+ by Adam Katz, GPL v2+\n";
+  print "Part of misc-scripts, https://github.com/adamhotep/misc-scripts\n";
+  print "cgrep 0.1.20250101.1 copyright 2024+ by Adam Katz, GPLv3+\n";
 }
 
 

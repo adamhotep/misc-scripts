@@ -17,8 +17,8 @@ help() {
 }
 
 version() {
-  echo "A part of misc-scripts, https://github.com/adamhotep/misc-scripts"
-  echo "sgr 1.0.20241214.0 copyright 2000+ by Adam Katz, GPLv2+"
+  echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "sgr 1.0.20241214.1 copyright 2000+ by Adam Katz, GPLv3+"
   exit
 }
 

@@ -19,8 +19,8 @@ Find words composed of LETTERS, without extra repitition (like for Scrabble)
   -r, --range=MIN[-MAX]  Specify min & max (just one means MIN==MAX)
   -x, --max=MAX          Maximum length (default = number of LETTERS)
 
-Part of misc-scripts: https://github.com/adamhotep/misc-scripts
-anagrams 0.2.20240714.0 copyright 2010+ by Adam Katz. Licensed GPLv3+
+Part of misc-scripts, https://github.com/adamhotep/misc-scripts
+anagrams 0.2.20240714.1 copyright 2010+ by Adam Katz, GPLv3+
 end_help
 }
 

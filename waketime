@@ -25,8 +25,8 @@ Note, `uptime` is faster. This can be slow when reading uncached sleep logs.
 }
 
 version() {
-  echo "waketime 0.1.20240512.1, Copyright 2024+ by Adam Katz, GPL v3+"
-  echo "Part of misc-scripts:  https://github.com/adamhotep/misc-scripts"
+  echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "waketime 0.1.20240512.2 copyright 2024+ by Adam Katz, GPLv3+"
   exit
 }
 

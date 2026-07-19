@@ -3,8 +3,8 @@ help() { cat <</help
 Find entire ownership hierarchy of given process(es) from top to bottom
 Usage: lsps [PID|COMMAND...]
 
-Part of misc-scripts: https://github.com/adamhotep/misc-scripts
-lsps 0.2.20240811.0, Copyright 2010+ by Adam Katz, GPL v2+
+Part of misc-scripts, https://github.com/adamhotep/misc-scripts
+lsps 0.2.20240811.1 copyright 2010+ by Adam Katz, GPLv3+
 /help
 }
 

@@ -15,8 +15,8 @@ If you're looking for phonetic transliterations, try one of:
 
 TODO: Handle Combining Diacritical Marks without the final perl call.
 
-Part of misc-scripts: https://github.com/adamhotep/misc-scripts
-utf2ascii 1.1.20260208.0 copyright © 2005+ by Adam Katz <@adamhotep>, GPLv3+
+Part of misc-scripts, https://github.com/adamhotep/misc-scripts
+utf2ascii 1.1.20260208.1 copyright © 2005+ by Adam Katz, GPLv3+
 /help
 }
 
