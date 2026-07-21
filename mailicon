@@ -1,0 +1,87 @@
+#!/bin/sh
+usage="Usage: mailicon [-hV] [-cz] [-a TEXT] [-b TEXT] [-I|-i TEXT] [-m PATH]"
+
+help() { cat <</help
+Show an (optional) icon, unread count, and (optional) total mail count
+$usage
+  -a, --after=STRING   Show this text after the other output
+  -b, --before=STRING  Show this text before the other output
+  -c, --count          Show the total email count (1/9 means 1 unread, 9 total)
+  -h, --help           Show this help
+  -i, --icon=STING     Replacement for \`$icon\` (consider \`✉\` to be narrower)
+  -I, --no-icon        Do not show an icon (same as \`-i ""\` or \`--icon=\`)
+  -m, --mbox=PATH      Path to your mailbox (currently \`$mbox\`)
+                       THIS DOES NOT SUPPORT MAILDIR.
+  -V, --version        Show this script's version info
+  -z, --zero           Show even if no unread (with -c, show even if zero total)
+
+Install in tmux with a line like \`set -g status-right '#(${0##*/} -c)\`
+
+/help
+  version
+}
+
+version() {
+  echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "mailicon 0.1.20260719.0, Copyright 2026+ by Adam Katz, GPLv3+"
+  exit
+}
+
+die() { printf '%s\n' "$@" >&2; exit ${exit:-2}; }
+
+after=
+before=
+count=0
+icon="📨"
+mbox="${MAIL:-/var/mail/$LOGNAME}"
+zero=0
+while getopts a:b:chi:Im:vVz-: OPT; do
+  if [ "$OPT" = - ]; then # long opt https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}"    OPTARG="${OPTARG#"$OPT"}"    OPTARG="${OPTARG#=}"
+  fi
+  : "parsing option -- $OPT"
+  case $OPT in
+    ( a | after )	after="$OPTARG" ;;
+    ( b | before )	before="$OPTARG" ;;
+    ( c | count )	count=count ;;
+    ( h | help* )	help ;;
+    ( i | icon )	icon="$OPTARG" ;;
+    ( I | no*icon )	icon="" ;;
+    ( m | mbox )	mbox="$OPTARG" ;;
+    ( [vV] | version )	version ;;
+    ( z | zero )	zero=zero ;;
+    ( \? )		die "$usage" ;;
+    ( * )		die "Illegal option --$OPT" "$usage" ;;
+  esac
+done
+shift $(( OPTIND - 1 ))
+
+# I was a little surprised there wasn't an easier way to do this, but I am
+# quite familiar with the standards and could implement it from scratch with awk
+# easily enough.
+
+real_mbox="$mbox"
+if [ ! -s "$mbox" ]; then
+  mbox=-
+elif [ ! -r "$mbox" ]; then
+  die "Cannot read \`$mbox\`" \
+    "Consider using \`--mbox=PATH\` or invoking as the appropriate user."
+fi
+
+printf "From \nStatus: R" |awk -v after="$after" -v before="$before" \
+  -v count="$count" -v icon="$icon" -v mbox="$real_mbox" -v zero="$zero" \
+'
+  /^From / { from++; next }
+  /^Status: / && index($2, "R") { read++ }
+  END {
+    if (!from) {
+      printf("Invalid mbox `%s`\n", mbox) > "/dev/stderr"
+      exit 2
+    }
+    from--	# do not count the placeholder message
+    read--	# do not count the placeholder message
+    unread = from - read
+    if (unread > 0 || count && from > 0 || zero) printf "%s%s%d%s%s",
+      before, icon, unread, (count ? "/" from : ""), after
+  }
+' "$mbox"

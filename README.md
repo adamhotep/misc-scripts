@@ -46,11 +46,20 @@ A smarter multi-pattern `grep` wrapper.
 ## hd
 Enhanced hex dump wrapper with colors and wide options.
 
+## loadicons
+A widget that shows colored load averages as processes, percents, or bar icons.
+For command line interfaces like tmux and screen.
+
 ## ls.swp
 Show notes on vim swap files.
 
 ## lsps
 List entire ownership hierarchy of given process(es) from top to bottom.
+
+## mailicon
+A widget that shows an (optional) icon and a count of unread mail
+in `/var/mail/$USER` and optional total message count.
+For command line interfaces like tmux and screen.
 
 ## md2confluence
 A basic (and only somewhat complete) converter of markdown to Atlassian Confluence wiki formatting.
