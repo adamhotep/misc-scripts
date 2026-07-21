@@ -131,7 +131,7 @@ getconf NPROCESSORS_ONLN |awk -v avg="$avg" -v action=$action -v out="$out" \
     if (!color) return ""
     if (code == 39) {
       if (tmux_colors) return "#[fg=default]"
-    } else { code = "38;5;" code }
+    } else if (!tmux_colors) { code = "38;5;" code }
     if (tmux_colors) return sprintf("#[fg=colour%s]", code)
     return sprintf("%c%c[%sm%c", 1, 27, code, 2)
   }
