@@ -37,6 +37,9 @@ Like `sleep`, but counts down visually when interactive and unpiped.
 ## diffc
 Colored diff, uses `git diff --patience` if available.
 
+## emojiclock
+Show a clock emoji representing the time (either top or bottom of the hour).
+
 ## gray
 Color standard output gray so standard error is nice and visible.
 

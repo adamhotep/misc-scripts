@@ -1,0 +1,62 @@
+#!/bin/sh
+# (Yes, this is actually a one-liner and the rest is unnecessary)
+help() { cat <</help
+Show a clock emoji representing the time (either top or bottom of the hour)
+Usage: ${0##*/} [OPTIONS]
+
+Options inherit from date. New and noteworthy options include:
+  -d, --date=STRING    Use the date from STRING rather than 'now' (nonstandard)
+  -h, --help           I think you figured this one out already
+  -V, --version        Show the below version information
+  -X, --exec=PATH      Use this \`date\` executable (unique to this script)
+
+See \`$date --help\` for a full list of options.
+
+This does not round. The emoji displayed represents the last 30-minute mark,
+so at 1:29, it reports 1:00, and at 12:59, it reports 12:30.
+
+To run in a different time zone, set \$TZ, like \`TZ=Europe/Paris ${0##*/}\`
+or \`TZ=PST8PDT ${0##*/}\`
+
+/help
+  version
+}
+
+version() {
+  echo "Wraps $(
+  "$date" --version 2>/dev/null |head -n1 |grep 'date .*[0-9]\.[0-9]' \
+    || echo "$date (unknon implementation, lacks --version)"
+  )"
+  echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "emojiclock 0.1.20260811.0, Copyright 2026+ by Adam Katz, GPLv3+"
+  exit 0
+}
+
+die() { printf '%s\n' "$@" >&2; exit ${exit:-2}; }
+
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+date=$(command -v date)
+while getopts d:f:Ihr:Rs:uVX:-: OPT; do
+  if [ "$OPT" = - ]; then # long opt https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}"    OPTARG="${OPTARG#"$OPT"}"    OPTARG="${OPTARG#=}"
+  fi
+  case $OPT in
+    ( h | help )	help ;;
+    ( V | version )	version ;;
+    ( X | exec* )	needs_arg; date="$OPTARG" ;;
+    ( \? )		die "Try --help" ;;
+  esac
+done
+
+# The clock emojis start at U+1F550, which in UTF-8 is 0xF0 0x9F 0x95 0x90,
+# which in decimal is 240 159 149 144. They begin with one oclock and increase
+# by one hour each place (so 240 159 149 154 is ten oclock), then we get the
+# bottoms of each hour (so 240 159 149 156 is 10:30).
+#
+# %I is the hour on a 12-hour clock, so at 10:00, we get 10 + 143 + 0 = 144
+# and at 10:30 we get 10 + 143 + 12 = 156.
+
+"$date" "$@" +%I\ %M |awk '{
+  printf "%c%c%c%c", 240, 159, 149, $1 + 143 + ($2 >= 30 ? 12 : 0)
+}'
