@@ -1,5 +1,5 @@
 #!/bin/sh
-usage="Usage: loadicons [-hV] [-c|-C] [-i|-p|-P] [-U FILE|UPTIME] [-X COMMAND]"
+usage="Usage: ${0##*/} [-hV] [-c|-C] [-i|-p|-P] [-U FILE|UPTIME] [-X COMMAND]"
 
 help() {
   bars=' ▁ ▂ ▃ ▄ ▅ ▆ ▇ █'	no_color="same as \`NO_COLOR=1 ${0##*/} …\`"
@@ -40,7 +40,7 @@ Install in tmux with a line like \`set -g status-right '#(${0##*/} -iTd "")\`
 version() {
   url="https://github.com/adamhotep/misc-scripts"
   echo "Part of ${hovertext:+$href$url$htext}misc-scripts$h0, $url"
-  echo "loadicons 0.1.20260711.1, Copyright 2026+ by Adam Katz, GPLv3+"
+  echo "loadicons 0.1.20260711.2, Copyright 2026+ by Adam Katz, GPLv3+"
   exit
 }
 
