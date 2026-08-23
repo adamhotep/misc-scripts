@@ -1,116 +1,221 @@
 #!/bin/sh
-# This is a messy pile of posix shell, awk, & perl. TODO: all perl or no perl?
 
-help() {	# assemble --help from GNU date's --help plus extras
+help() {	# assemble --help from date's --help plus extras
   self="${0##*/}"
   cat <</short_help
 Usage: xdate [OPTION]... [+FORMAT]
 Show the current time. Formats include YYYYMMDD_HHMMSS & xlsDDDDD[.DDD] (Excel)
 
-  -d, --date=STRING      Display time described by STRING, not 'now'
-      --debug            Annotate the parsed date, noting questionable usage
-  -f, --file=DATEFILE    Like --date; once for each line of DATEFILE
-  -I, --iso-8601[=FMT]   Output date/time in ISO 8601 format.
-  -R, --rfc-email        Output date and time in RFC 5322 format.
-      --rfc-3339=FMT     Output date/time in RFC 3339 format.
-  -r, --reference=FILE   Display the last modification time of FILE
-      --ss-format=FMT    Spreadsheet date format: \`excel\`, \`mac\`, or \`ooo\`
-  -s, --set=STRING       Set time described by STRING
-  -u, --utc, --universal Print or set Coordinated Universal Time (UTC)
-  -x, --exec=PATH        Run the date command with PATH, not \`date\`
-  -h, --help             Display brief help and exit
-  -h, --long-help        Display comprehensive help and exit
-  -V, --version          Output version information and exit
+  -d, --date=STRING        Display time described by STRING, not 'now'
+      --debug              Annotate the parsed date, noting questionable usage
+  -f, --file=DATEFILE      Like --date; once for each line of DATEFILE
+  -I, --iso-8601[=FMT]     Output date/time in ISO 8601 format.
+  --moon-phase=HEMISPHERE  Moon perspective (default: \`north\`, right-to-left)
+  -R, --rfc-email          Output date and time in RFC 5322 format.
+      --rfc-3339=FMT       Output date/time in RFC 3339 format.
+  -r, --reference=FILE     Display the last modification time of FILE
+  -s, --set=STRING         Set time described by STRING
+  -u, --utc, --universal   Print or set Coordinated Universal Time (UTC)
+  -x, --exec=PATH          Run the date command with PATH, not \`date\`
+  -h, --help               Display brief help and exit
+  -h, --long-help          Display comprehensive help and exit
+  -V, --version            Output version information and exit
 
 /short_help
-  if [ "$1" = --long ]; then
-    cat <</long_help
+  if [ -z "$LINES" ]; then LINES=$(tput lines); fi
+  if [ -z "$COLUMNS" ]; then COLUMNS=$(tput cols); fi
+  export COLUMNS LINES
+  # --long-help comes from parsing `date --help` and adding more {{{
+  # Expect this parser to need help in future releases of `date`.
+  # Last tuned to GNU coreutils 9.10 and uutils coreutils 0.8.0
+  if [ "$1" = --long ] || [ "$LINES" -ge 50 ] 2>/dev/null; then
+    xls="SPREADSHEET SERIAL DATES
 
-Excel does not deal with time zones or daylight savings (DST). Because of that,
-$self makes everything relative to the *current* DST offset.  Converting back
-to a standard date in $self may be an hour off, but it should work in Excel.
+Numeric date strings between 2360-100100 are interpreted as spreadsheet serials.
+Spreadsheets do not deal with time zones or daylight savings (summer time).
+$self makes everything relative to the *current* time zone offset.
+Converting to another date format may be an hour off due to daylight savings.
 
-$self defaults to OpenOffice dates before 1899/12/31 and Excel afterwords:
+This script uses OpenOffice dates. Microsoft Excel dates between 1899-12-31
+(the smallest date it accepts) and 1900-02-28 are all shifted one day later due
+to the Lotus 1-2-3 cheat noted at https://stackoverflow.com/a/32578059/519360
+"
 
-  --ss-format=  NOTES             DAY 1        DAY 59     DAY 60      Day 61
-  (default)     OO then Excel   1899/12/31  1900/02/28  1900/02/28  1900/03/01
-  excel         Leap year bug   1900/01/01  1900/02/28  1900/02/28  1900/03/01
-  openoffice                    1899/12/31  1900/02/27  1900/02/28  1900/03/01
-  mac           Excel for Mac   1904/01/01  1904/02/28  1904/02/29  1904/03/01
+# TODO: zodiac names/emojis/symbols? Chinese zodiac names/emojis?
+# https://github.com/SergeantAcoustic/moon-phases-nerd-font/blob/main/src/main.rs
 
-Learn more at https://stackoverflow.com/a/32578059/519360"
-
-/long_help
-
-    "$gdate" --help 2>&1 |awk -v self="$self" '
+    "$gdate" $date_app --help 2>&1 |awk -v self="$self" -v xls="$xls" '
       function opt(option, desc) { return sprintf("%-*s%s", i, option, desc) }
       function popt(option, desc) { print opt(option, desc) }
-      /^date: illegal/	{ bsd = 1; next }
-      $1 == "FORMAT"	{ format_section = 1 }
+      function print_xdate_sequences() {
+        for (v = 1; v <= vt; v++) {
+          printf "  %-*s  %s\n", vars[0], vars[v], vard[v]
+        }
+      }
+      BEGIN {
+        vt = 0
+        vars[vt] = 16
+        vard[vt] = 54
+        vars[++vt] = "%{moon_emoji}"
+          vard[vt] = "Show the moon emoji (8 phases, width=2, aka `%{moon}`)"
+          varx[vt] = "\xf0\x9f\x8c\x92"
+        vars[++vt] = "%{moon_nerdfont}"
+          vard[vt] = "Nerd Font / Material Design glyph (28 phases, width=1)"
+          varx[vt] = "\xee\x8e\x92"
+        vars[++vt] = "%{moon_percent}"
+          vard[vt] = "Show the percent of a full moon (0=new, 100=full)"
+          varx[vt] = "35"
+        vars[++vt] = "%{moon_pct_new}"
+          vard[vt] = "Show the percent of a new moon (0=100=new, 50=full)"
+          varx[vt] = "18"
+        vars[++vt] = "%{moon_phase}"
+          vard[vt] = "Show the name of the phase (8 phases, width=3-15)"
+          varx[vt] = "waxing crescent"
+        vars[++vt] = "%{serial}"
+          vard[vt] = "Spreadsheet date serial number (days since 1899-12-31)"
+          varx[vt] = "45678.901234"
+          vard[++vt] = "Day 1 = 1900-01-01 and day 59 = day 60 = 1900-02-28"
+        deprecated_J = "days after 1899-12-30 (deprecated, use %{serial})"
+      }
+      /^[a-z]+: illegal/	{ bsd = 1; next }
+      $1 == "FORMAT"	{ format_section = 1; sub(/^ +/, "") }
       ! format_section	{ next }
-      /^Examples/i	{ examples = 1 }
-      /^Report bugs/	{ print "Convert Excel time to a date"
-      			  print "  $ xdate --date=12345\n"
-      			  exit }
-      /(^|[,:$] +)date/	{ sub (/date/, self) }
+      $1 != "|" && table > 0 {
+        width = ENVIRON["COLUMNS"]
+        if (width >= seq[0] + desc[0] + ex[0] + 9) x = 1
+
+        print ""
+
+        for (t = 1; t <= table; t++) {
+          if (t == 2) {
+            seq[t]  = sprintf("%-*s", seq[0],  ""); gsub(/ /, "-", seq[t])
+            desc[t] = sprintf("%-*s", desc[0], ""); gsub(/ /, "-", desc[t])
+            ex[t]   = sprintf("%-*s", ex[0]-1, ""); gsub(/ /, "-", ex[t])
+          }
+          printf "| %-*s | %-*s |" (x ? " %-*s|\n" : "%-*s\n"),
+            seq[0], seq[t], desc[0], desc[t], x ? ex[0] : 0, x ? ex[t] : ""
+        }
+
+        for (v = 1; v <= vt; v++) {
+          xlen = ex[0]
+          if (x && vars[v] ~ "emoji|nerd") xlen += 2
+          printf "| %-*s | %-*s |" (x ? " %-*s|\n" : "%-*s\n"),
+            vars[0],vars[v], vard[0],vard[v], x ? xlen : 0,x ? varx[v] : ""
+        }
+        print ""
+
+        table = -1
+        xls = "\n" xls
+        next
+      }
+      table < 0 { sub(/^       /, ""); if ($1 == "Arguments:") exit }
+      $1 == "|" && /^ *\|.*\|.*\|/ {	# uutils coreutils uses markdown tables
+        table++
+        if ($2 ~ /^----/) { next }
+        split($0, cell, / *\| */)
+
+        seq[table] = cell[2]
+        len = length(cell[2])
+        if (len > seq[0]) seq[0] = len  	# max
+
+        desc[table] = cell[3]
+        len = length(cell[3])
+        if (len > desc[0]) desc[0] = len	# max
+
+        ex[table] = cell[4]
+        len = length(cell[4])
+        if (len > ex[0]) ex[0] = len	# max
+
+        if ($2 == "%j") {
+          table++
+          seq[table] = "%J"
+          desc[table] = deprecated_J
+          ex[table] = "45678.901234"
+        }
+
+        next
+      }
+      $0 == "Examples:"	{ print xls }
+      /^Report bugs|online help/ { exit }
+      /(^[[:space:]]*|[,:$\x27] +)date/	{ sub (/date/, self) }
+      $1 == "%Z" { print; print_xdate_sequences(); next }
       { print }
-      $1 == "%j"  { sub(/j/, "J"); sub(/ of.*/, "s after 1899/12/30"); print }
-      END 	{ if (bsd) print "\nLearn more about formats: `man strftime`" }
+      $1 == "%j" {
+        sub(/j/, "J")
+        sub(/day of.*/, deprecated_J)
+        print
+      }
+      $0 == "Examples:" {
+        if (table == -1) {	# uutils coreutils
+          indent1 = "  "
+          indent2 = "\n\n  "
+          indent3 = "\n  "
+        } else {		# GNU coreutils
+          indent1 = ""
+          indent2 = "\n  $ "
+          indent3 = "\n"
+        }
+        printf "\n%sConvert Excel time to a date%sxdate --date=12345%s\n",
+          indent1, indent2, indent3
+      }
+      END 	{ if (bsd) {
+        print "XDATE SEQUENCES"
+        print_xdate_sequences()
+        print "\nLearn about standard date sequences: `man strftime`"
+      } }
     '
-  fi
+  fi	# end --long-help }}}
   version
 }
 
 version() {
-  date_ver=$(date --version 2>/dev/null |grep -F . |head -n1)
+  date_ver=$("$gdate" --version 2>/dev/null |grep '\.[0-9]' |head -n1)
   echo "Wraps ${date_ver:-date (version unknown; BSD?)}"
   echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
-  echo "xdate 0.3.20260315.2 copyright 2010+ by Adam Katz, GPLv3+"
+  echo "xdate 2.0.20260823.0 copyright 2010+ by Adam Katz, GPLv3+"
   exit
 }
 
-debug() { [ -n "$DEBUG" ] && echo "$*" >&2; }
+die() { printf '%s\n' "$@" >&2; exit ${exit:-2}; }
 
-xls_epoch=0 # calculated on first use since it's only used with -d and -f
+debug() { [ -n "$DEBUG" ] && printf '%s\n' "$@" >&2; }
 
 # Usage: map_dates_filter
 # Preprocessor for date's --date=STRING and --file=DATEFILE
-# accept more date formats: YYYYMMDD_HHMMSS, DDDDD.DDD, xlsDDDDD[.DDD]
+# Accept more date formats: YYYYMMDD_HHMMSS, DDDDD.DDD, xlsDDDDD[.DDD]
+# No, we will not accept moon phase data as input "dates"
 map_dates_filter() {
-  # Unix epoch offset of Excel epoch https://stackoverflow.com/a/32578059/519360
-  if [ "$xls_epoch" -ge 0 ]; then
-    # nested call works around Excel's lack of understanding of daylight savings
-    local TZ="$(date +%z)"
-    xls_epoch="$(( xls_epoch + $("$gdate" -d "1899/12/30 00:00:00 $TZ" +%s) ))"
-  fi
-  awk -v xls="$xls" -v xls_epoch="$xls_epoch" '
+  awk '
     NF == 1 && $1 ~ /^[0-9]+_[0-9]+(\.[0-9]*)?$/ \
     && $1 ~ /^[12]...[01].[0-3]._[0-2].([0-6].([0-6].(\.[0-9]*)?)?)?$/ {
       $0 = sprintf("%04d/%02d/%02d %02d:%02d:%02d\n",
-        substr($0, 1, 4), substr($0, 5, 2), substr($0, 7, 2),
+        substr($0,  1, 4), substr($0,  5, 2), substr($0, 7, 2),
         substr($0, 10, 2), substr($0, 12, 2), substr($0, 14))
     }
     /^xls[+-]?[0-9]+(\.[0-9]*)?$/ { sub(/^xls\+?/, "", $1); x = 1 }
-    x || /^-?[0-9]+$/ && 2359 < $1/1 && $1/1 < 99999 || /^(-?[0-9]+\.[0-9]*)$/ {
-      if (($1 >= 0 || xls == 2) && $1 < 60 && xls) $1++; # Excel bug
-      $0 = sprintf("@%.0f\n", xls_epoch + $1 * 86400)
+    # why 2360-100100? because 2359 = "today at 23:59" and 100101 = "2010-01-01"
+    x || /^-?[0-9]+$/ && 2359 < $1/1 && $1/1 < 100101 || /^(-?[0-9]+\.[0-9]*)$/{
+      #if ($1 >= 0 && $1 < 61) $1++; # undo the 1-2-3/Excel cheat
+      $0 = sprintf("@%.0f\n", $1 * 86400)
       x = 0
     }
     1
   ' "$@"
+}
 
-  return
-  # why 2360-100101? because 2359 = "today at 23:59" and 100101 = "2010/01/01"
- #perl -ne '
- #  if (/^[12]\d\d\d[01]\d[0-3]\d_[0-2]\d([0-6]\d([0-6]\d)?)?(\s|$)/) {
- #    printf "%04d/%02d/%02d %02d:%02d:%02d\n",
- #      substr($_,0,4), substr($_,4,2), substr($_,6,2),
- #      substr($_,9,2), substr($_,11,2), substr($_,13);
- #  } elsif (2359 < $_ && $_ < 100101 || /^-?[0-9]*\.[0-9]*$/) {
- #    $_++ if ($_ >= 0 or $ENV{xls} == 2) and $_ < 60 and $ENV{xls}; # Excel bug
- #    printf "@%.0f\n", $ENV{xls_epoch} + $_ * 86400
- #  } else { print; }
- #' "$@"
+set_fmt() {
+  local f="${1#+}"
+  if [ -n "$fmt" ] || [ $optfmt -gt 0 ]; then
+    die "${0##*/}: multiple output formats specified"
+  fi
+  shift
+  if [ $# -gt 0 ]; then
+    # account for escaped percents before converting the cue character
+    local esc2="2@$$#"	# literal \x91 (private use one) for portability
+    fmt="+%s $(echo "$f" |sed -E "s/%%/$esc2/g; $*; s/$esc2/%%/g" )"
+  else
+    fmt="+%s $f"
+  fi
 }
 
 # convert file or string to mapped version
@@ -129,35 +234,38 @@ map_dates() {
 
 
 # Getopts can't handle altering values, nor can it handle optional arguments
-reset= next= xls=1 pid=$$ gdate=date long=
+# TODO: I think I can use it anyway using a recursive call
+reset= next= d= pid=$$ gdate=date long= optfmt=0 moon_perspective=north
+esc1="1@$pid#"	# literal \x91 (private use one) for portability
 for arg in "$@"; do
   debug "HERE looping on <$arg>"
   if [ -z "$reset" ]; then reset=1; set --; fi
   if [ -n "$next" ]; then
     case $next in
-      ( -[df] ) 	set -- "$@" "$next" "$(map_dates "$arg")" ;;
+      ( -[df] ) 	d=d; set -- "$@" "$next" "$(map_dates "$arg")" ;;
       ( -x )		gdate="$arg" ;;
-      ( --ss-format )	ss_fmt="$arg" ;;
+      ( --moon )	moon_perspective="$arg" ;;
       ( -* )		set -- "$@" "$next" "$arg" ;;
     esac
     next=
     continue
   fi
 
+  # TODO: map short options to long options rather than repeating logic
   if [ "$arg" != "${arg#-[!-]}" ]; then
     opt="${arg#-}"
     while [ -n "$opt" ]; do
       case $opt in
         ( d )		next=-d ;;
-        ( d?* ) 	set -- "$@" -d "$(map_dates "${opt#d}")"; break ;;
+        ( d?* ) 	d=d; set -- "$@" -d "$(map_dates "${opt#d}")"; break ;;
         ( f )		next=-f ;;
         ( f?* ) 	set -- "$@" -f "$(map_dates "${opt#f}")"; break ;;
-        ( h* )		help=1 ;;
+        ( h* )		get_help=1 ;;
         ( [rs] )	next=-"$opt" ;;
-        ( [Ir]* )	set -- "$@" "-$opt"; break ;;
-        ( R* )		set -- "$@" -R ;;
+        ( [Ir]* )	set -- "$@" "-$opt"; optfmt=$(( optfmt + 1 )); break ;;
+        ( R* )		set -- "$@" -R; optfmt=$(( optfmt + 1 )) ;;
         ( u* )		set -- "$@" -u; export TZ=UTC ;;
-        ( [Vv]* )	version ;;
+        ( [Vv]* )	get_version=1 ;;
         ( x )		next=-x ;;
         ( x* )		gdate="${opt#x}"; break ;;
         ( * )		rest="${opt#?}"; set -- "$@" "-${opt%$rest}" ;;
@@ -165,105 +273,215 @@ for arg in "$@"; do
       opt="${opt#?}"
     done
   else
+    s_J="s/%([^{}%J]*)J/$esc1{\\1serial%z}/g"
+    s_bracket="s/%[{]([^%}]*)[}]/$esc1{\\1%z}/g"
     case $arg in
-      ( +*%*J* ) 	set -- "$@" "$(echo "$arg" |awk -v pid="$pid" '{
-          gsub(/(^|[^%])%[ #+-]*[0-9]*(\.[0-9]*)?J/, "&<" pid "<%s%z>"); print
-        }')" ;;
-      #( +*%*J* ) 	set -- "$@" "$(echo "$arg" |perl -pe \
-      #		  "s/(?<!%)(%(?:[ #+-]*\d*(?:\.\d*)?)?J)/\$1<$pid<%s%z>/g")" ;;
+      ( +*%*J* )	set_fmt "$arg" "$s_J; $s_bracket" ;;
+      ( +*%[{]*[}]* )	set_fmt "$arg" "$s_bracket" ;;
+      ( +* )		set_fmt "$arg" ;;
       ( [0-9+]* )	set -- "$@" "$arg" ;;
       ( --date )	next=-d ;;
-      ( --date=* )	set -- "$@" --date="$(map_dates "${arg#--date=}")" ;;
+      ( --date=* )	d=d; set -- "$@" -d "$(map_dates "${arg#--date=}")" ;;
       ( --debug )	DEBUG=1; set -- "$@" $arg ;;
-      ( --exec=?* )	gdate="${arg#*=}"; debug "set gdate='$gdate'" ;;
+      ( --exec=* )	gdate="${arg#*=}"; debug "set gdate='$gdate'" ;;
       ( --exec )	next=-x ;;
       ( --file )	next=-f ;;
       ( --file=* )	set -- "$@" --file="$(map_dates "${arg#--file=}")" ;;
-      ( --help )	help=1 ;;
-      ( --*help* )	help --long ;;
+      ( --help )	get_help=1 ;;
+      ( --*help* )	get_help=1 long=--long ;;
       ( --long )	long=--long ;;
+      ( --moon*=* )	moon_perspective="${arg#*=}" ;;
+      ( --moon* )	next=--moon ;;
       ( --rfc-3339 )	next=$arg ;;
-      ( --ss-format )	next=$arg ;;
-      ( --ss-format=* )	ss_fmt="${arg#*=}" ;;
       ( --utc | --univ* )	export TZ=UTC; set -- "$@" "$arg" ;;
-      ( --version )	version ;;
+      ( --version )	get_version=1 ;;
       ( * )		set -- "$@" "$arg" ;;
     esac
   fi
 done
 
-case $ss_fmt in
-  ( '' )	: "using default openoffice format" ;;
-  ( e | excel* | x | xl | xls* | ms* | microsoft* )	xls=2 ;;
-  ( m | ma | mac* | 1904* )	xls_mac=1 xls_epoch=126316800 xls=0 ;;
-  ( [ol] | ooo | [ol]*office* ) 			xls=0 ;;
-  ( * ) echo "${0##*/}: invalid argument '$ss_fmt' for '--ss-format'" >&2
-        echo "Valid arguments are:" >&2
-        echo "  - 'excel' or 'xls' or 'ms'" >&2
-        echo "  - 'mac' or '1904'" >&2
-        echo "  - 'libreoffice' or 'openoffice' or 'ooo'" >&2
-        echo "Try '${0##*/} --help' for more information." >&2
-        exit 2
-        ;;
-esac
+export DEBUG TZ
 
-export xls DEBUG xls_mac TZ
+date_app=
+if [ "$d" = d ] && ! "$gdate" -d @0 >/dev/null 2>&1; then
+  if [ "$gdate" = date ]; then
+    we_have() { command -v "$1" >/dev/null 2>&1; }  # true if the command exists
+    for gdate in gdate udate "busybox date" "toybox date" date; do
+      if we_have "${gdate%% *}" && $gdate -d @0 >/dev/null 2>&1; then
+        if [ "${gdate%% *}" != "$gdate" ]; then
+          debug "We are now set to use \`$gdate\` rather than \`date\`"
+          date_app="${gdate#* }"
+          gdate="${gdate%% *}"
+        fi
+        break
+      elif [ "$gdate" = date ]; then
+        die "${0##*/}: Couldn't locate a \`date\` variant that supports \`-d\`"
+      fi
+    done
+  else
+    die "${0##*/}: failed to successfully run \`$gdate -d @0\`"
+  fi
+fi
 
-if [ -n "$help" ]; then
+if [ -n "$get_help" ]; then
   help $long
+elif [ -n "$get_version" ]; then
+  version
 elif [ -z "$tmp" ]; then	# remove the trap if it's not needed
   trap - $trap_codes
 fi
 
-if ! "$gdate" -d now >/dev/null 2>&1; then
-  we_have() { command -v "$1" >/dev/null 2>&1; }  # true if we have the command
-  if [ "$gdate" = date ]; then
-    if we_have gdate && gdate -d now >/dev/null 2>&1; then
-      gdate=gdate
-      debug "We are now set to use \`gdate\` (GNU) rather than \`date\` (?)"
-    elif we_have busybox && busybox date -d now >/dev/null 2>&1; then
-      bdate() { busybox date "$@"; }
-      gdate=bdate
-      debug "We are now set to use \`busybox date\` rather than \`date\`"
-    fi
-  else
-    echo "${0##*/}: failed to successfully run \`$gdate -d now\`" >&2
-    exit 2
-  fi
-fi
+case $moon_perspective in
+  ( north )	direction=1 ;;
+  ( south )	direction=-1 ;;
+  ( * ) 	die "${0##*/}: invalid moon phase \`$moon_perspective\`" \
+  		  'Valid options are `north` (the default) and `south`' ;;
+esac
 
-"$gdate" "$@" |perl -wpe 'use strict;
-  my $re =
-    qr/(?<!%)%([-_^#]*\d*(?:\.\d*)?[EO]?)?J<'$pid'<(-?\d+)([+-])0?(\d+)(\d\d)>/;
-  if (my @d = /$re/) {
-    my $sign = ($d[2] eq "+" ? 1 : -1);
-    my $J = $d[1]/86400 + 25569 + $sign * ($d[3] + $d[4]/60) / 24;
 
-    if ($ENV{DEBUG}) {
-      print STDERR $_ . qq(1="$d[0]" 2="$d[1]" 3="$d[2]" 4="$d[3]" 5="$d[4]"\n)
-        . "$d[1]/86400 + 25569 + $sign * ($d[3] + $d[4]/60) / 24 = $J\n";
-    }
-
-    # adjust for daylight savings: localtime()[8] = is_dst
-    my @now  = localtime();
-    my @then = localtime($d[1]);
-    $J += ($now[8] - $then[8]) / 24;
-
-    # adjust for Excel bug
-    $J-- if $ENV{xls} and $J < 61 and ($ENV{xls} == 2 or $J > 0);
-
-    $J -= 1462 if $ENV{xls_mac};
-
-    # format as specified
-    if ($d[0] ne "") {
-      $J = sprintf("%".$d[0]."f", $J);
-    } else {
-      $d[0] = ".6";
-      $J = sprintf("%".$d[0]."f", $J);
-      $J =~ s/\.?0+$//;
-    }
-
-    s/$re/$J/g;
+"$gdate" $date_app "$@" ${fmt:+"$fmt"} \
+|awk -v gdate="$gdate $date_app" -v esc1="$esc1" -v direction="$direction" '
+  BEGIN {
+    # moon constants
+    ref_epoch = 1789097249	# reference date: 2026-09-11 03:27 UTC new moon
+    synodic_avg = 2551443	# avg lunar month (stddev ~3.3h, up to 1d2m off)
+    pct_halfday = 4320000 / synodic_avg  # half day in pct_new units (see below)
   }
-  '
 
+  function moon_percent_new() {	# yeah, this uses and sets global variables
+    # percent between new moons (0=100=new, 50=full)
+    pct_new = (100 * (time - ref_epoch) / synodic_avg) % 100 * direction
+    if (pct_new < 0) pct_new += 100   # handle past dates
+
+    # https://science.nasa.gov/moon/daily-moon-guide has the quarters
+    # (new, first quater, full, third quater) as one-day events
+    # rather than equal eighths of the siderial month, so we reflect that here.
+    if (pct_new < pct_halfday || pct_new > 100 - pct_halfday) p = 1
+    else if (pct_new < 25 - pct_halfday) p = 2
+    else if (pct_new < 25 + pct_halfday) p = 3
+    else if (pct_new < 50 - pct_halfday) p = 4
+    else if (pct_new < 50 + pct_halfday) p = 5
+    else if (pct_new < 75 - pct_halfday) p = 6
+    else if (pct_new < 75 + pct_halfday) p = 7
+    else p = 8
+  }
+
+  function tz2sec(z) {	# tz is always 5 chars, from -1200 to +1400
+    sign = substr(z, 1, 1)
+    hour = substr(z, 2, length(z) - 3)	# zero-padding is fine in awk
+    min = substr(z, length(z) - 3)
+    return (sign == "+" ? 1 : -1) * (hour / 24 + min / 1440)
+  }
+
+  # ensure multibyte glyphs are counted as one byte
+  function sprintfd_width(w, min) {
+    dec = w
+    sub(/^.*\./, "", dec)
+    w = int(w)
+    if (dec) {
+      # this logic will break if min > 10, but the largest glyphs are 4-byte
+      if (dec < min) dec = min
+      else dec -= (min - 1)
+    }
+    if (w < min) w = min
+    else w -= (min - 1)
+    return w + dec
+  }
+
+  # Translate from POSIX date syntax to POSIX printf syntax
+  # and interpret various special values like moon phases
+  function sprintdf(template) {
+    tz = substr(template, length(template) - 4)
+    template = substr(template, 1, length(template) - 5)
+    flag = substr(template, 1, 1)		# first character
+    upper = 0
+    spec = "f"
+    width = 0
+
+    if      (flag == "-")	{ flag = ""; template = substr(template, 2) }
+    else if (flag == "_")	flag = " "
+    else if (flag ~ "^[0+]")	flag = "0"
+    else if (flag == "^")	{ flag = ""; template = substr(template, 2); upper = 1 }
+    else if (flag == "#")	{ flag = ""; template = substr(template, 2); upper = 2 }
+    else flag = ""
+
+    if (match(template, /[0-9]*(\.[0-9]*)?/)) {
+      width = substr(template, RSTART, RLENGTH) / 1
+    }
+    seq = substr(template, length(flag) + 1 + (width ? length(width) : 0))
+    sub(/^ */, "", seq)  # allow spaces between width and specifier
+
+    # we are ignoring the modifiers (E and O)
+
+    # {{{ determine the value
+    # TODO: separate into a new function? probalby not given spec & width)
+
+    if (seq == "serial" || seq == "xls" || seq == "excel") {
+      cmd = gdate " +%z"	# current unix epoch and time zone
+      cmd | getline now_tz
+      tz_diff = tz2sec(now_tz) - tz2sec(tz)
+
+      value = time / 86400 + 25569 + tz_diff
+
+      # MS Excel does not permit negative values as dates (but OpenOffice does)
+      # and Excel exhibits the Lotus 1-2-3 hack that intentionally treats
+      # 1900 as a leap year (it was not). Therefore, these values can be
+      # a day more recent if between 1899-12-31 and 1900-03-01.
+      # The next line would "solve" that for MS Excel while creating an
+      # off-by-one error for OpenOffice between those dates. That was previously
+      # configurable here, but that was overkill; we use OpenOffice consistency.
+      #if (0 < value && value < 61) value--	# undo the Excel 1900 cheat
+    } else if (seq == "moon_percent") {
+      moon_percent_new()
+      # percent of a full moon (0=new, 100=full)
+      if (pct_new > 50) value = 100 - (pct_new - 50) * 2
+      else value = pct_new * 2
+    } else if (seq == "moon_pct_new") {
+      moon_percent_new()
+      value = pct_new
+    } else if (seq == "moon_phase") {
+      spec = "s"
+      split("new,waxing crescent,first quarter,waxing gibbous," \
+            "full,waning gibbous,third quater,waning crescent,new", phases, ",")
+      moon_percent_new()
+      value = phases[p]
+      delete phases
+    } else if (seq ~ /^(moon(_emoji)?|\xf0\x9f\x8c[\x91-\x98])$/) {
+      spec = "s"
+      moon_percent_new()
+      value = sprintf("%c%c%c%c", 240, 159, 140, 144 + p)
+      width = sprintfd_width(width, 4)
+    } else if (seq == "moon_nerdfont" || seq ~ /^\xee\x8e[\x8d-\xa8]$/) {
+      spec = "s"
+      moon_percent_new()
+      value = sprintf("%c%c%c",
+        238, 142, 141 + int(pct_new * 28 / 100 + 0.5) % 28)
+      width = sprintfd_width(width, 3)
+    } else {
+      # unrecognized; pass it through (note: BSD normally removes the `%` part)
+      return "%{" template "}"
+    }
+
+    # end determine the value }}}
+
+    # At the moment, "opposite case" has no difference from "upper case"
+    # and thank goodness, because swapping case sounds hard without `tr`
+    if (upper >= 1) value = toupper(value)
+
+    return sprintf("%" flag width spec, value)
+  }
+
+  $1 ~ /^-?[0-9]+$/ { time = $1; $0 = substr($0, length(time) + 2) }
+  {
+    while ( match($0, esc1 "[{][^%}]+[}]") ) {
+      rpos = RSTART
+      rlen = RLENGTH
+      L = length(esc1) + 1
+      repl = substr($0, rpos + L, rlen - L - 1)
+      $0 = substr($0, 1, rpos - 1) \
+           sprintdf(repl) \
+           substr($0, rpos + rlen)
+    }
+    print
+  }
+'
