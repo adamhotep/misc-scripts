@@ -26,7 +26,7 @@ Note, `uptime` is faster. This can be slow when reading uncached sleep logs.
 
 version() {
   echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
-  echo "waketime 0.1.20240512.2 copyright 2024+ by Adam Katz, GPLv3+"
+  echo "waketime 0.2.20250612.0 copyright 2024+ by Adam Katz, GPLv3+"
   exit
 }
 
@@ -56,7 +56,11 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 linux_only() { die "ERROR: This only works on GNU/Linux${1+ (missing: $*)}"; }
 
-sleeplog() { journalctl -b-0 -u sleep.target -o "$@"; }
+if command -v ionice >/dev/null 2>&1; then
+  ionice=ionice
+fi
+
+sleeplog() { $ionice journalctl -b-0 -u sleep.target -o "$@"; }
 
 # Thermometer for load averages
 # Usage: therm FIRST_COLOR NUMB.ER
