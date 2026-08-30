@@ -50,19 +50,22 @@ Learn more at https://stackoverflow.com/a/32578059/519360"
       ! format_section	{ next }
       /^Examples/i	{ examples = 1 }
       /^Report bugs/	{ print "Convert Excel time to a date"
-      			  print "  $ xdate --date=12345\n" }
+      			  print "  $ xdate --date=12345\n"
+      			  exit }
       /(^|[,:$] +)date/	{ sub (/date/, self) }
       { print }
       $1 == "%j"  { sub(/j/, "J"); sub(/ of.*/, "s after 1899/12/30"); print }
       END 	{ if (bsd) print "\nLearn more about formats: `man strftime`" }
     '
-    echo "xdate wrapper home page: <https://github.com/adamhotep/misc-scripts>"
-    echo ""
-  else
-    echo ""
-    echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
   fi
-  echo "xdate 0.3.20260315.1 copyright 2010+ by Adam Katz, GPLv3+"
+  version
+}
+
+version() {
+  date_ver=$(date --version 2>/dev/null |grep -F . |head -n1)
+  echo "Wraps ${date_ver:-date (version unknown; BSD?)}"
+  echo "Part of misc-scripts, https://github.com/adamhotep/misc-scripts"
+  echo "xdate 0.3.20260315.2 copyright 2010+ by Adam Katz, GPLv3+"
   exit
 }
 
